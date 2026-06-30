@@ -17,8 +17,9 @@ export async function handleTweetMenu(
   console.log("\n--- Tweet Menu ---");
   console.log("  1. Advanced tweet search");
   console.log("  2. User's recent tweets");
-  console.log("  3. Tweet replies");
-  console.log("  4. Trends");
+  console.log("  3. User tweets by sort (latest / top)");
+  console.log("  4. Tweet replies");
+  console.log("  5. Trends");
   console.log("  0. Back");
 
   const choice = await ask(rl, "\nChoice: ");
@@ -47,6 +48,25 @@ export async function handleTweetMenu(
       break;
     }
     case "3": {
+      const userName = await ask(rl, "Username: ");
+      const sortStr = await ask(rl, "Sort by: 1=Latest (default), 2=Top: ");
+      const queryType = sortStr.trim() === "2" ? "Top" : "Latest";
+      const limitStr = await ask(rl, "Max results (default 10): ");
+      const limit = parseInt(limitStr.trim()) || 10;
+      const query = `from:${userName.trim()}`;
+      let count = 0;
+      console.log(`\n[${queryType}] tweets from @${userName.trim()}\n`);
+      for await (const t of tweetSvc.advancedSearch(query, queryType)) {
+        const likes = t.likeCount !== undefined ? ` ❤ ${t.likeCount.toLocaleString()}` : "";
+        const rts = t.retweetCount !== undefined ? ` 🔁 ${t.retweetCount.toLocaleString()}` : "";
+        console.log(`[${t.createdAt}]${likes}${rts}`);
+        console.log(`  ${t.text.slice(0, 120).replace(/\n/g, " ")}\n`);
+        if (++count >= limit) break;
+      }
+      console.log(`Showed ${count} tweet(s).`);
+      break;
+    }
+    case "4": {
       const tweetId = await ask(rl, "Tweet ID: ");
       const replies = await tweetSvc.getReplies(tweetId.trim());
       console.log("");
@@ -56,7 +76,7 @@ export async function handleTweetMenu(
       console.log(`\n${replies.length} reply(ies).`);
       break;
     }
-    case "4": {
+    case "5": {
       const woeidStr = await ask(rl, "WOEID (1=worldwide, 23424977=US, default 1): ");
       const woeid = parseInt(woeidStr.trim()) || 1;
       const trends = await trendSvc.getTrends(woeid, 20);
