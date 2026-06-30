@@ -5,8 +5,13 @@ export interface Trend {
   tweetVolume?: number;
 }
 
+interface TrendItem {
+  trend: { name: string; rank?: number };
+  tweetCount?: number;
+}
+
 interface TrendsResponse {
-  data: { trends: Trend[] };
+  trends: TrendItem[];
 }
 
 export class TrendService {
@@ -17,6 +22,9 @@ export class TrendService {
       woeid: String(woeid),
       count: String(count),
     });
-    return res.data?.trends ?? [];
+    return (res.trends ?? []).map((item) => ({
+      name: item.trend.name,
+      tweetVolume: item.tweetCount,
+    }));
   }
 }
