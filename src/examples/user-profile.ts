@@ -7,7 +7,7 @@ async function main() {
   const client = new TwitterClient(config.apiKey);
   const users = new UserService(client);
 
-  const TARGET = process.argv[2] ?? "elonmusk";
+  const TARGET = process.argv[2] ?? "0xMantleKR";
 
   const info = await users.getUserInfo(TARGET);
   console.log(`\n@${info.userName} (${info.name})`);

@@ -8,7 +8,7 @@ async function main() {
   const tweets = new TweetService(client);
 
   const query =
-    process.argv[2] ?? "from:elonmusk since:2025-01-01 min_faves:1000";
+    process.argv[2] ?? "from:0xMantleKR since:2025-01-01";
   const MAX = 20;
 
   console.log(`\nSearching: ${query}`);
