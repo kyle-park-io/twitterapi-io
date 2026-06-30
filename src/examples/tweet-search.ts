@@ -14,12 +14,13 @@ const SORT_KEY: Record<SortBy, keyof Tweet> = {
   bookmarks: "bookmarkCount",
 };
 
-function parseArgs(argv: string[]): { query: string; outputPath?: string; sort: string; sortBy?: SortBy } {
+function parseArgs(argv: string[]): { query: string; outputPath?: string; sort: string; sortBy?: SortBy; max: number } {
   const args = argv.slice(2);
   let query = "from:0xMantleKR since:2025-01-01";
   let outputPath: string | undefined;
   let sort = "Latest";
   let sortBy: SortBy | undefined;
+  let max = 20;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--output" && args[i + 1]) {
@@ -28,6 +29,8 @@ function parseArgs(argv: string[]): { query: string; outputPath?: string; sort: 
       sort = args[++i];
     } else if (args[i] === "--sort-by" && args[i + 1]) {
       sortBy = args[++i] as SortBy;
+    } else if (args[i] === "--max" && args[i + 1]) {
+      max = parseInt(args[++i]) || 20;
     } else if (!args[i].startsWith("--")) {
       query = args[i];
     }
@@ -38,22 +41,21 @@ function parseArgs(argv: string[]): { query: string; outputPath?: string; sort: 
     process.exit(1);
   }
 
-  return { query, outputPath, sort, sortBy };
+  return { query, outputPath, sort, sortBy, max };
 }
 
 async function main() {
-  const { query, outputPath, sort, sortBy } = parseArgs(process.argv);
+  const { query, outputPath, sort, sortBy, max } = parseArgs(process.argv);
   const client = new TwitterClient(loadConfig().apiKey);
   const tweets = new TweetService(client);
-  const MAX = 20;
 
   console.log(`\nSearching: ${query} [${sort}${sortBy ? `, sorted by ${sortBy}` : ""}]`);
-  console.log(`(showing up to ${MAX} results)\n`);
+  console.log(`(showing up to ${max} results)\n`);
 
   const results: Tweet[] = [];
   for await (const t of tweets.advancedSearch(query, sort)) {
     results.push(t);
-    if (results.length >= MAX) break;
+    if (results.length >= max) break;
   }
 
   if (sortBy) {
@@ -76,7 +78,7 @@ async function main() {
     if (dir) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       outputPath,
-      JSON.stringify({ query, sort, sortBy, tweets: results }, null, 2),
+      JSON.stringify({ query, sort, sortBy, max, tweets: results }, null, 2),
       "utf8"
     );
     console.log(`Saved to ${outputPath}`);
