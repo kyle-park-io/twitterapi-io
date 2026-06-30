@@ -1,0 +1,37 @@
+{
+  "name": "twitterapi-io",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "cli": "ts-node src/cli/menu.ts",
+    "example:user": "ts-node src/examples/user-profile.ts",
+    "example:search": "ts-node src/examples/tweet-search.ts",
+    "example:write": "ts-node src/examples/write-actions.ts",
+    "example:trends": "ts-node src/examples/trends.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kyle-park-io/twitterapi-io.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/kyle-park-io/twitterapi-io/issues"
+  },
+  "homepage": "https://github.com/kyle-park-io/twitterapi-io#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}
