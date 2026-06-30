@@ -53,7 +53,7 @@ async function main() {
             await writer.login();
             console.log("Logged in.");
           }
-          await handleWriteMenu(rl, client, loadWriteConfig(), writer);
+          await handleWriteMenu(rl, writer);
           break;
         }
         case "0":

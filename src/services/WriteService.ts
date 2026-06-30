@@ -43,6 +43,9 @@ export class WriteService {
       "/twitter/user_login_v2",
       body
     );
+    if (!res.login_cookies) {
+      throw new Error("Login failed: no cookies returned from API");
+    }
     this.loginCookies = res.login_cookies;
   }
 

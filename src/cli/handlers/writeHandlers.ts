@@ -1,6 +1,4 @@
 import * as readline from "readline";
-import { IHttpClient } from "../../client/IHttpClient";
-import { WriteConfig } from "../../config";
 import { WriteService } from "../../services/WriteService";
 
 function ask(rl: readline.Interface, question: string): Promise<string> {
@@ -9,8 +7,6 @@ function ask(rl: readline.Interface, question: string): Promise<string> {
 
 export async function handleWriteMenu(
   rl: readline.Interface,
-  client: IHttpClient,
-  config: WriteConfig,
   writer: WriteService
 ): Promise<void> {
   console.log("\n--- Write Menu (requires login) ---");
