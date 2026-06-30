@@ -50,6 +50,21 @@ interface UserSearchResponse {
   next_cursor: string;
 }
 
+export interface MentionTweet {
+  id: string;
+  text: string;
+  createdAt: string;
+  author?: { userName: string; name: string };
+  likeCount?: number;
+  retweetCount?: number;
+}
+
+interface MentionsResponse {
+  tweets: MentionTweet[];
+  has_next_page: boolean;
+  next_cursor: string;
+}
+
 export class UserService {
   constructor(private readonly client: IHttpClient) {}
 
@@ -96,5 +111,18 @@ export class UserService {
       { query }
     );
     return res.users ?? [];
+  }
+
+  async *getMentions(userName: string): AsyncGenerator<MentionTweet> {
+    let cursor = "";
+    while (true) {
+      const res = await this.client.get<MentionsResponse>(
+        "/twitter/user/mentions",
+        { userName, cursor }
+      );
+      for (const t of res.tweets ?? []) yield t;
+      if (!res.has_next_page) break;
+      cursor = res.next_cursor ?? "";
+    }
   }
 }

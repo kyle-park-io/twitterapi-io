@@ -62,4 +62,17 @@ export class TweetService {
     );
     return res.tweets ?? [];
   }
+
+  async *getListTweets(listId: string): AsyncGenerator<Tweet> {
+    let cursor = "";
+    while (true) {
+      const res = await this.client.get<TweetSearchResponse>(
+        "/twitter/list/tweets",
+        { listId, cursor }
+      );
+      for (const t of res.tweets ?? []) yield t;
+      if (!res.has_next_page) break;
+      cursor = res.next_cursor ?? "";
+    }
+  }
 }
