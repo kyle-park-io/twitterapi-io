@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "twitterapi-io": {
+      "source": "kaitoInfra/twitterapi-io",
+      "sourceType": "github",
+      "skillPath": "skills/twitterapi-io/SKILL.md",
+      "computedHash": "2602e07593235d2d711a5f5285be36952c83c1f5944197f4351cf40d64cc64a4"
+    }
+  }
+}
