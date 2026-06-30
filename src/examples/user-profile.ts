@@ -1,15 +1,21 @@
+import * as fs from "fs";
+import * as path from "path";
 import { loadConfig } from "../config";
 import { TwitterClient } from "../client/TwitterClient";
-import { UserService } from "../services/UserService";
+import { UserService, Follower } from "../services/UserService";
 
 async function main() {
   const config = loadConfig();
   const client = new TwitterClient(config.apiKey);
   const users = new UserService(client);
 
-  const TARGET = process.argv[2] ?? "0xMantleKR";
+  const args = process.argv.slice(2);
+  const outputFlag = args.indexOf("--output");
+  const outputPath = outputFlag !== -1 ? args[outputFlag + 1] : undefined;
+  const target = args.find((a) => !a.startsWith("--") && args[args.indexOf(a) - 1] !== "--output")
+    ?? "0xMantleKR";
 
-  const info = await users.getUserInfo(TARGET);
+  const info = await users.getUserInfo(target);
   console.log(`\n@${info.userName} (${info.name})`);
   console.log(`Followers : ${info.followers.toLocaleString()}`);
   console.log(`Following : ${info.following.toLocaleString()}`);
@@ -18,10 +24,18 @@ async function main() {
 
   const FOLLOWER_LIMIT = 10;
   console.log(`\nFirst ${FOLLOWER_LIMIT} followers:`);
-  let count = 0;
-  for await (const f of users.getFollowers(TARGET)) {
+  const followers: Follower[] = [];
+  for await (const f of users.getFollowers(target)) {
     console.log(`  @${f.userName} — ${f.name}`);
-    if (++count >= FOLLOWER_LIMIT) break;
+    followers.push(f);
+    if (followers.length >= FOLLOWER_LIMIT) break;
+  }
+
+  if (outputPath) {
+    const dir = path.dirname(outputPath);
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(outputPath, JSON.stringify({ profile: info, followers }, null, 2), "utf8");
+    console.log(`Saved to ${outputPath}`);
   }
 }
 
