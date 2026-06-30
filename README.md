@@ -5,7 +5,7 @@ TypeScript examples for the [twitterapi.io](https://twitterapi.io) REST API — 
 ## Setup
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env
 # Fill in TWITTERAPI_IO_KEY (and X_* vars for write operations)
 ```
@@ -13,16 +13,16 @@ cp .env.example .env
 ## Running Examples
 
 ```bash
-npm run example:user           # user profile + followers
-npm run example:search         # advanced tweet search
-npm run example:trends         # worldwide + US trends
-npm run example:write          # login → create tweet → delete it (requires X_* vars)
+pnpm example:user           # user profile + followers
+pnpm example:search         # advanced tweet search
+pnpm example:trends         # worldwide + US trends
+pnpm example:write          # login → create tweet → delete it (requires X_* vars)
 ```
 
 ## Interactive CLI
 
 ```bash
-npm run cli
+pnpm cli
 ```
 
 ## Project Structure
