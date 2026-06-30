@@ -12,11 +12,37 @@ cp .env.example .env
 
 ## Running Examples
 
+### User Profile
+
 ```bash
-pnpm example:user           # user profile + followers
-pnpm example:search         # advanced tweet search
-pnpm example:trends         # worldwide + US trends
-pnpm example:write          # login → create tweet → delete it (requires X_* vars)
+pnpm example:user                                        # default: 0xMantleKR
+pnpm example:user -- <username>
+pnpm example:user -- <username> --output output/profile.json
+```
+
+### Tweet Search
+
+```bash
+pnpm example:search                                      # default: from:0xMantleKR since:2025-01-01
+pnpm example:search -- "<query>"
+pnpm example:search -- "<query>" --sort Latest           # Twitter chronological (default)
+pnpm example:search -- "<query>" --sort Top              # Twitter algorithm
+pnpm example:search -- "<query>" --sort-by likes         # client-side sort: likes|views|retweets|replies|bookmarks
+pnpm example:search -- "<query>" --max 100               # fetch up to 100 tweets (default: 20)
+pnpm example:search -- "<query>" --max 100 --sort-by views --output output/tweets.json
+```
+
+### Trends
+
+```bash
+pnpm example:trends
+pnpm example:trends -- --output output/trends.json
+```
+
+### Write Actions (requires X_* env vars)
+
+```bash
+pnpm example:write          # login → create tweet → delete it
 ```
 
 ## Interactive CLI
@@ -24,6 +50,12 @@ pnpm example:write          # login → create tweet → delete it (requires X_*
 ```bash
 pnpm cli
 ```
+
+Menus: User / Tweet (search, recent, sort, replies, trends) / Write (login, tweet, like, follow, DM)
+
+## Output
+
+Results can be saved as JSON via `--output <path>`. The `output/` directory is git-ignored.
 
 ## Project Structure
 
@@ -34,6 +66,7 @@ src/
   examples/    — standalone runnable scripts
   cli/         — interactive menu + handlers
   config.ts    — environment variable loader
+output/        — JSON output files (git-ignored)
 ```
 
 ## Environment Variables
