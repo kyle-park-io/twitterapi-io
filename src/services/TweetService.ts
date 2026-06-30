@@ -8,6 +8,9 @@ export interface Tweet {
   likeCount?: number;
   retweetCount?: number;
   replyCount?: number;
+  quoteCount?: number;
+  viewCount?: number;
+  bookmarkCount?: number;
 }
 
 interface TweetSearchResponse {
