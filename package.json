@@ -12,7 +12,8 @@
     "example:user": "ts-node src/examples/user-profile.ts",
     "example:search": "ts-node src/examples/tweet-search.ts",
     "example:write": "ts-node src/examples/write-actions.ts",
-    "example:trends": "ts-node src/examples/trends.ts"
+    "example:trends": "ts-node src/examples/trends.ts",
+    "example:mantle-research-challenge": "ts-node src/examples/mantle-research-challenge.ts"
   },
   "repository": {
     "type": "git",

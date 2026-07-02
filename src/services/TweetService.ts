@@ -2,6 +2,7 @@ import { IHttpClient } from "../client/IHttpClient";
 
 export interface Tweet {
   id: string;
+  url?: string;
   text: string;
   createdAt: string;
   author?: { userName: string; name: string };
@@ -11,6 +12,8 @@ export interface Tweet {
   quoteCount?: number;
   viewCount?: number;
   bookmarkCount?: number;
+  quoted_tweet?: { url?: string; id?: string } | null;
+  retweeted_tweet?: { url?: string; id?: string } | null;
 }
 
 interface TweetSearchResponse {
@@ -58,12 +61,17 @@ export class TweetService {
     return res.tweets ?? [];
   }
 
-  async getQuotes(tweetId: string): Promise<Tweet[]> {
-    const res = await this.client.get<TweetSearchResponse>(
-      "/twitter/tweet/quotes",
-      { tweetId }
-    );
-    return res.tweets ?? [];
+  async *getQuotes(tweetId: string): AsyncGenerator<Tweet> {
+    let cursor = "";
+    while (true) {
+      const res = await this.client.get<TweetSearchResponse>(
+        "/twitter/tweet/quotes",
+        { tweetId, cursor }
+      );
+      for (const t of res.tweets ?? []) yield t;
+      if (!res.has_next_page) break;
+      cursor = res.next_cursor ?? "";
+    }
   }
 
   async *getListTweets(listId: string): AsyncGenerator<Tweet> {
