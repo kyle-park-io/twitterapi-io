@@ -4,3 +4,4 @@ output/
 .env
 instruction.md
 *.js.map
+.auth/
