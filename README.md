@@ -60,13 +60,26 @@ Run:
 
 ```bash
 pnpm example:auto-follow                 # dry-run (default): reports targets, follows nobody
-pnpm example:auto-follow -- --no-dry-run # actually follow
-pnpm example:auto-follow -- --interval 30 --max 15
 ```
 
-Config lives in `config/auto-follow.json`. A value set there wins over the CLI
-flag; flags fill in only omitted fields. Follow history and the browser session
-are stored under `.auth/` (git-ignored) so restarts don't re-follow or re-login.
+Config lives in `config/auto-follow.json`, and a value set there **wins over the
+matching CLI flag** — flags only fill in fields the JSON omits. The shipped
+config sets every tunable field, so tune behavior by editing the JSON:
+
+| Field | Effect |
+|---|---|
+| `dryRun` | `true` (default) reports targets without following. **Set to `false` to actually follow.** |
+| `intervalMinutes` | Minutes between cycles (default 60). |
+| `perKeyword` | Max tweets scanned per keyword per cycle (default 30). |
+| `maxPerRun` | Max follows per cycle (default 25). |
+
+CLI flags (`--interval <min>`, `--per-keyword <n>`, `--max <n>`,
+`--dry-run` / `--no-dry-run`) take effect only for fields you remove from the
+JSON. This means you can never *accidentally* leave dry-run with a stray flag —
+disabling it is a deliberate edit to `config/auto-follow.json`.
+
+Follow history and the browser session are stored under `.auth/` (git-ignored)
+so restarts don't re-follow or re-login.
 
 Requires the `X_*` env vars (see below) for the browser login.
 
