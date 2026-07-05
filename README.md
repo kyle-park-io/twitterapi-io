@@ -47,8 +47,11 @@ pnpm example:write          # login → create tweet → delete it
 
 ### Auto-Follow (keyword search → browser follow via Playwright)
 
-Continuously searches the keywords in `config/auto-follow.json` and follows the
-authors of matching tweets through a real browser session (Playwright).
+Each cycle samples a few keywords from `config/auto-follow.json` at random,
+searches them, and queues the tweet authors as candidates; then it follows up
+to `maxPerRun` of them through a real browser session (Playwright). Candidates
+beyond the per-cycle cap stay queued for the next cycle, so search results are
+never wasted and the search API is hit only enough to keep the queue full.
 
 One-time setup:
 
@@ -70,16 +73,18 @@ config sets every tunable field, so tune behavior by editing the JSON:
 |---|---|
 | `dryRun` | `true` (default) reports targets without following. **Set to `false` to actually follow.** |
 | `intervalMinutes` | Minutes between cycles (default 60). |
-| `perKeyword` | Max tweets scanned per keyword per cycle (default 30). |
-| `maxPerRun` | Max follows per cycle (default 25). |
+| `keywordsPerCycle` | Keywords sampled per search batch (default 3). |
+| `perKeyword` | Max tweets scanned per sampled keyword (default 30). |
+| `maxPerRun` | Max follows per cycle, and the queue top-up target (default 25). |
 
-CLI flags (`--interval <min>`, `--per-keyword <n>`, `--max <n>`,
-`--dry-run` / `--no-dry-run`) take effect only for fields you remove from the
-JSON. This means you can never *accidentally* leave dry-run with a stray flag —
-disabling it is a deliberate edit to `config/auto-follow.json`.
+CLI flags (`--interval <min>`, `--keywords-per-cycle <n>`, `--per-keyword <n>`,
+`--max <n>`, `--dry-run` / `--no-dry-run`) take effect only for fields you
+remove from the JSON. This means you can never *accidentally* leave dry-run with
+a stray flag — disabling it is a deliberate edit to `config/auto-follow.json`.
 
-Follow history and the browser session are stored under `.auth/` (git-ignored)
-so restarts don't re-follow or re-login.
+Follow history and the pending-candidate queue are stored under `.auth/`
+(git-ignored) alongside the browser session, so restarts resume the same queue
+without re-following or re-searching.
 
 Requires the `X_*` env vars (see below) for the browser login.
 
