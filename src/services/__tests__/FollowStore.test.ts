@@ -56,3 +56,51 @@ test("save creates parent directories", () => {
   store.save();
   assert.equal(fs.existsSync(file), true);
 });
+
+test("enqueue adds to queue and queueSize reflects it", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("alice");
+  store.enqueue("bob");
+  assert.equal(store.queueSize(), 2);
+});
+
+test("enqueue skips users already followed or already queued (case-insensitive)", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.add("Followed");
+  store.enqueue("followed"); // already followed -> skip
+  store.enqueue("Alice");
+  store.enqueue("alice"); // already queued -> skip
+  assert.equal(store.queueSize(), 1);
+  assert.equal(store.isQueued("ALICE"), true);
+  assert.equal(store.isQueued("followed"), false);
+});
+
+test("dequeue returns up to n usernames in FIFO order and removes them", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("a");
+  store.enqueue("b");
+  store.enqueue("c");
+  const first = store.dequeue(2);
+  assert.deepEqual(first, ["a", "b"]);
+  assert.equal(store.queueSize(), 1);
+  const rest = store.dequeue(5); // more than available
+  assert.deepEqual(rest, ["c"]);
+  assert.equal(store.queueSize(), 0);
+});
+
+test("queue round-trips through save/load", () => {
+  const file = tmpFile();
+  const a = new FollowStore(file);
+  a.load();
+  a.enqueue("x");
+  a.enqueue("y");
+  a.save();
+
+  const b = new FollowStore(file);
+  b.load();
+  assert.equal(b.queueSize(), 2);
+  assert.deepEqual(b.dequeue(2), ["x", "y"]);
+});
