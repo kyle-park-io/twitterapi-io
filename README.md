@@ -45,6 +45,31 @@ pnpm example:trends -- --output output/trends.json
 pnpm example:write          # login → create tweet → delete it
 ```
 
+### Auto-Follow (keyword search → browser follow via Playwright)
+
+Continuously searches the keywords in `config/auto-follow.json` and follows the
+authors of matching tweets through a real browser session (Playwright).
+
+One-time setup:
+
+```bash
+npx playwright install chromium
+```
+
+Run:
+
+```bash
+pnpm example:auto-follow                 # dry-run (default): reports targets, follows nobody
+pnpm example:auto-follow -- --no-dry-run # actually follow
+pnpm example:auto-follow -- --interval 30 --max 15
+```
+
+Config lives in `config/auto-follow.json`. A value set there wins over the CLI
+flag; flags fill in only omitted fields. Follow history and the browser session
+are stored under `.auth/` (git-ignored) so restarts don't re-follow or re-login.
+
+Requires the `X_*` env vars (see below) for the browser login.
+
 ## Interactive CLI
 
 ```bash
