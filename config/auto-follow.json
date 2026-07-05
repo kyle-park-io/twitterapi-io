@@ -1,0 +1,49 @@
+{
+  "keywords": [
+    "AI agents min_faves:500",
+    "agentic AI min_faves:400",
+    "autonomous agents min_faves:300",
+    "AI agent wallet min_faves:200",
+    "AI 에이전트 min_faves:50",
+    "AI 에이전트 지갑 min_faves:20",
+    "자율 에이전트 min_faves:20",
+
+    "Claude min_faves:300",
+    "Anthropic min_faves:300",
+    "MCP min_faves:200",
+    "verifiable inference min_faves:100",
+    "클로드 min_faves:30",
+    "앤트로픽 min_faves:20",
+    "MCP 서버 min_faves:20",
+
+    "crypto AI agents min_faves:300",
+    "onchain AI min_faves:250",
+    "DeFi agents min_faves:200",
+    "온체인 AI min_faves:30",
+    "크립토 AI min_faves:30",
+    "디파이 min_faves:30",
+
+    "x402 min_faves:150",
+    "stablecoin payments min_faves:250",
+    "restaking min_faves:250",
+    "zk proof min_faves:250",
+    "크립토 min_faves:50",
+    "온체인 min_faves:30",
+    "스테이블코인 min_faves:30",
+    "리스테이킹 min_faves:20",
+
+    "yapping min_faves:200",
+    "Kaito min_faves:200",
+    "InfoFi min_faves:150",
+    "mindshare min_faves:200",
+    "attention economy min_faves:200",
+    "야핑 min_faves:20",
+    "카이토 min_faves:20",
+    "인포파이 min_faves:20"
+  ],
+  "queryType": "Latest",
+  "intervalMinutes": 60,
+  "perKeyword": 30,
+  "maxPerRun": 25,
+  "dryRun": true
+}
