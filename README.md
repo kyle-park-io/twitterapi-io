@@ -57,7 +57,19 @@ One-time setup:
 
 ```bash
 npx playwright install chromium
+pnpm save-session          # opens a browser; log in to X by hand, then press Enter
 ```
+
+`save-session` opens a real browser window at the X login page. Log in yourself
+(username, password, 2FA), and once you see your home timeline, return to the
+terminal and press Enter — the session is saved to `.auth/x-session.json` and
+reused on every later run. This is the **recommended** path: X aggressively
+flags automated logins, so logging in by hand once and reusing the session is
+far more reliable (and won't get your account rate-limited).
+
+If `.auth/x-session.json` is missing or stale, the tool falls back to an
+automated login using the `X_*` env vars — but X may block or challenge it, so
+prefer `save-session`.
 
 Run:
 

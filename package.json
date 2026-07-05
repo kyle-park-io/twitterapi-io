@@ -15,8 +15,9 @@
     "example:trends": "ts-node src/examples/trends.ts",
     "example:mantle-research-challenge": "ts-node src/examples/mantle-research-challenge.ts",
     "example:mantle-kr-q2-audit": "ts-node src/examples/mantle-kr-q2-audit.ts",
+    "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\"",
     "example:auto-follow": "ts-node src/examples/auto-follow.ts",
-    "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\""
+    "save-session": "ts-node src/examples/save-session.ts"
   },
   "repository": {
     "type": "git",

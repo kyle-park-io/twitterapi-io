@@ -54,32 +54,58 @@ export class BrowserFollowService implements IFollower {
   private async performLogin(page: Page): Promise<void> {
     await page.goto("https://x.com/i/flow/login", { waitUntil: "domcontentloaded" });
 
+    // X's login inputs carry stable `name`/`type` attributes in both headless and
+    // headful Chromium, whereas their accessible names ("Email or username", "Password")
+    // are only present when headful — so target the attributes, not the a11y name.
+    // Each step is submitted with Enter, which is more reliable than locating the
+    // step button (its label and DOM nesting change across A/B variants of the flow).
+
     // Step 1: username
-    await page.getByLabel("Phone, email, or username").fill(this.config.xUser);
-    await page.getByRole("button", { name: "Next" }).click();
+    const userField = page.locator('input[name="username_or_email"]').first();
+    await userField.waitFor({ timeout: 30000 });
+    await userField.fill(this.config.xUser);
+    await userField.press("Enter");
 
-    // X sometimes asks for the email/username to confirm an unusual login.
-    const confirm = page.getByTestId("ocfEnterTextTextInput");
-    if (await confirm.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await confirm.fill(this.config.xEmail);
-      await page.getByTestId("ocfEnterTextNextButton").click();
-    }
-
-    // Step 2: password
-    await page.getByLabel("Password", { exact: true }).fill(this.config.xPassword);
-    await page.getByTestId("LoginForm_Login_Button").click();
-
-    // Step 3: optional TOTP 2FA
-    if (this.config.xTotp) {
-      const totpInput = page.getByTestId("ocfEnterTextTextInput");
-      if (await totpInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-        const { authenticator } = await import("otplib");
-        await totpInput.fill(authenticator.generate(this.config.xTotp));
-        await page.getByTestId("ocfEnterTextNextButton").click();
+    // X sometimes inserts an unusual-login check asking for the email/phone before the
+    // password. It reuses the same username input `name`, so if a username field is
+    // still showing (and no password field yet), fill the email and continue.
+    const passwordField = page.locator('input[name="password"], input[type="password"]').first();
+    if (!(await passwordField.isVisible({ timeout: 8000 }).catch(() => false))) {
+      const confirm = page.locator('input[name="username_or_email"]').first();
+      if (await confirm.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await confirm.fill(this.config.xEmail);
+        await confirm.press("Enter");
       }
     }
 
-    await page.waitForURL("https://x.com/home", { timeout: 30000 });
+    // Step 2: password
+    const pw = page.locator('input[name="password"], input[type="password"]').first();
+    await pw.waitFor({ timeout: 15000 });
+    await pw.fill(this.config.xPassword);
+    await pw.press("Enter");
+
+    // Step 3: optional TOTP 2FA. X's one-time-code input uses name="text"; fall back to
+    // the numeric-inputmode / one-time-code inputs used by some variants.
+    if (this.config.xTotp) {
+      const totpInput = page
+        .locator(
+          'input[name="text"], input[autocomplete="one-time-code"], input[inputmode="numeric"]'
+        )
+        .first();
+      if (await totpInput.isVisible({ timeout: 8000 }).catch(() => false)) {
+        const { authenticator } = await import("otplib");
+        await totpInput.fill(authenticator.generate(this.config.xTotp.replace(/\s/g, "")));
+        await totpInput.press("Enter");
+      }
+    }
+
+    // Success = landing on the home timeline. URL doesn't always update in headless, so
+    // also accept the primary-nav "Home" link appearing.
+    await Promise.race([
+      page.waitForURL("https://x.com/home", { timeout: 30000 }),
+      page.getByTestId("AppTabBar_Home_Link").waitFor({ timeout: 30000 }),
+      page.getByTestId("primaryColumn").waitFor({ timeout: 30000 }),
+    ]);
   }
 
   async follow(username: string): Promise<void> {
@@ -88,13 +114,20 @@ export class BrowserFollowService implements IFollower {
     try {
       await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded" });
 
-      const followButton = page.getByTestId("placementTracking").getByRole("button", {
-        name: /^Follow$/,
+      // The profile-header button's accessible name is "Follow @<username>" (and flips
+      // to "Following @<username>" once followed). Matching by the "Follow @" prefix
+      // targets the header action specifically and won't match "Followers"/"Following"
+      // count links. The follow-back "Follow" button in the sidebar is avoided by the
+      // @-prefix requirement.
+      const followButton = page.getByRole("button", {
+        name: new RegExp(`^Follow @${username}$`, "i"),
       });
 
-      if (await followButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      if (await followButton.isVisible({ timeout: 8000 }).catch(() => false)) {
         await followButton.click();
-        await page.getByRole("button", { name: /^Following$/ }).waitFor({ timeout: 5000 });
+        await page
+          .getByRole("button", { name: new RegExp(`^Following @${username}$`, "i") })
+          .waitFor({ timeout: 8000 });
       }
       // If the Follow button is not visible, we are already following — no-op.
     } finally {
