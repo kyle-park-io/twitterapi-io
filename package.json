@@ -32,6 +32,7 @@
   "homepage": "https://github.com/kyle-park-io/twitterapi-io#readme",
   "dependencies": {
     "dotenv": "^17.4.2",
+    "otplib": "^12.0.1",
     "playwright": "^1.61.1"
   },
   "devDependencies": {
