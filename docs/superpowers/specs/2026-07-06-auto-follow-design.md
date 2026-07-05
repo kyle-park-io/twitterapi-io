@@ -2,6 +2,39 @@
 
 **Date:** 2026-07-06
 
+## v2 Revision (2026-07-06) — random-keyword sampling + candidate queue
+
+The v1 design below searched **all** keywords every cycle, collected far more
+candidates than `maxPerRun`, followed 25, and discarded the rest — the discarded
+candidates never came back (the `since:` filter excluded them next cycle). That is
+wasteful: dozens of searches per cycle to follow only 25 people, most search results
+thrown away.
+
+**v2 changes (this is what is implemented):**
+
+1. **Candidate queue.** `FollowStore` gains a persisted queue of pending usernames.
+   Search *fills* the queue; follow *drains* it. Nothing found is discarded.
+2. **Random keyword sampling.** Each cycle picks `keywordsPerCycle` (default 3) keywords
+   at random instead of scanning all 36. If the queue is still below `maxPerRun` after
+   searching those, it samples another batch and searches again, repeating until the
+   queue reaches `maxPerRun` or all keywords are exhausted this cycle.
+3. **No `since:` filter.** Removed. Each search fetches the latest popular tweets;
+   duplicates are prevented by the queue + followed-set (a username already followed or
+   already queued is skipped). `getLastRun`/`setLastRun` are no longer needed for the
+   query but the timestamp may remain for informational logging.
+4. **Cycle = fill-then-drain.** One cycle: top up the queue via sampled searches (only if
+   short), then follow up to `maxPerRun` from the queue, removing each followed user from
+   the queue. Search and follow stay in one process/loop (not split).
+
+**Effect:** search calls drop from ~36–72/cycle to ~3–9/cycle (3 keywords × 1–2 pages,
+occasionally another batch), with zero wasted candidates.
+
+New config field: `keywordsPerCycle` (default 3). `perKeyword` still caps tweets scanned
+per sampled keyword.
+
+Everything below is the v1 design, kept for context; where it conflicts with this v2
+section (the `since:` filter, "scan all keywords", discard-extras), **v2 governs.**
+
 ## Overview
 
 A long-running automation that periodically searches X/Twitter for tweets matching a

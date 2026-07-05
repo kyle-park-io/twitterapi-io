@@ -46,6 +46,7 @@ export interface AutoFollowConfig {
   queryType: string;
   intervalMinutes: number;
   perKeyword: number;
+  keywordsPerCycle: number;
   maxPerRun: number;
   dryRun: boolean;
   storageStatePath: string;
@@ -57,6 +58,7 @@ interface AutoFollowFile {
   queryType?: string;
   intervalMinutes?: number;
   perKeyword?: number;
+  keywordsPerCycle?: number;
   maxPerRun?: number;
   dryRun?: boolean;
 }
@@ -64,6 +66,7 @@ interface AutoFollowFile {
 function parseAutoFollowFlags(argv: string[]): {
   intervalMinutes?: number;
   perKeyword?: number;
+  keywordsPerCycle?: number;
   maxPerRun?: number;
   dryRun?: boolean;
 } {
@@ -71,6 +74,7 @@ function parseAutoFollowFlags(argv: string[]): {
   const flags: {
     intervalMinutes?: number;
     perKeyword?: number;
+    keywordsPerCycle?: number;
     maxPerRun?: number;
     dryRun?: boolean;
   } = {};
@@ -79,6 +83,8 @@ function parseAutoFollowFlags(argv: string[]): {
       flags.intervalMinutes = parseInt(args[++i], 10);
     } else if (args[i] === "--per-keyword" && args[i + 1]) {
       flags.perKeyword = parseInt(args[++i], 10);
+    } else if (args[i] === "--keywords-per-cycle" && args[i + 1]) {
+      flags.keywordsPerCycle = parseInt(args[++i], 10);
     } else if (args[i] === "--max" && args[i + 1]) {
       flags.maxPerRun = parseInt(args[++i], 10);
     } else if (args[i] === "--dry-run") {
@@ -113,6 +119,7 @@ export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowC
     queryType: file.queryType ?? "Latest",
     intervalMinutes: pick(file.intervalMinutes, flags.intervalMinutes, 60),
     perKeyword: pick(file.perKeyword, flags.perKeyword, 30),
+    keywordsPerCycle: pick(file.keywordsPerCycle, flags.keywordsPerCycle, 3),
     maxPerRun: pick(file.maxPerRun, flags.maxPerRun, 25),
     dryRun: pick(file.dryRun, flags.dryRun, true),
     storageStatePath: path.join(process.cwd(), ".auth", "x-session.json"),

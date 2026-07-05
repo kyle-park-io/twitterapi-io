@@ -29,6 +29,7 @@ async function main() {
     keywords: config.keywords,
     queryType: config.queryType,
     perKeyword: config.perKeyword,
+    keywordsPerCycle: config.keywordsPerCycle,
     maxPerRun: config.maxPerRun,
     dryRun: config.dryRun,
   });
@@ -43,9 +44,9 @@ async function main() {
   process.on("SIGINT", shutdown);
 
   console.log(
-    `Auto-follow started — ${config.keywords.length} keywords, ` +
-      `maxPerRun=${config.maxPerRun}, interval=${config.intervalMinutes}m, ` +
-      `dryRun=${config.dryRun}`
+    `Auto-follow started — ${config.keywords.length} keywords ` +
+      `(${config.keywordsPerCycle} sampled/batch), maxPerRun=${config.maxPerRun}, ` +
+      `interval=${config.intervalMinutes}m, dryRun=${config.dryRun}`
   );
 
   if (!config.dryRun) {
@@ -61,7 +62,7 @@ async function main() {
       const summary = await runner.runCycle();
       console.log(
         `Cycle done — scanned ${summary.scanned}, ` +
-          `candidates ${summary.candidates}, followed ${summary.followed.length}`
+          `queued ${summary.queued}, followed ${summary.followed.length}`
       );
     } catch (err) {
       console.error("Cycle error:", err instanceof Error ? err.message : String(err));

@@ -56,6 +56,11 @@ export class FollowStore {
     return this.queue.length;
   }
 
+  /** Return up to `n` queued usernames in FIFO order WITHOUT removing them. */
+  peek(n: number): string[] {
+    return this.queue.slice(0, n);
+  }
+
   /** Remove and return up to `n` queued usernames in FIFO order. */
   dequeue(n: number): string[] {
     const taken = this.queue.splice(0, n);

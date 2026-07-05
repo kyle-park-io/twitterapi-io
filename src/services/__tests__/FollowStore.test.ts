@@ -91,6 +91,15 @@ test("dequeue returns up to n usernames in FIFO order and removes them", () => {
   assert.equal(store.queueSize(), 0);
 });
 
+test("peek returns queued usernames without removing them", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("a");
+  store.enqueue("b");
+  assert.deepEqual(store.peek(1), ["a"]);
+  assert.equal(store.queueSize(), 2); // peek does not consume
+});
+
 test("queue round-trips through save/load", () => {
   const file = tmpFile();
   const a = new FollowStore(file);
