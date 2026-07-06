@@ -34,6 +34,7 @@ function recordingFollower(): { followed: string[] } & IFollower {
     followed,
     async follow(username: string) {
       followed.push(username);
+      return "followed" as const;
     },
   };
 }
@@ -325,8 +326,16 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
 
 function failingFollower(): IFollower {
   return {
-    async follow(_username: string) {
+    async follow(_username: string): Promise<never> {
       throw new Error("blocked");
+    },
+  };
+}
+
+function alreadyFollowingFollower(): IFollower {
+  return {
+    async follow(_username: string) {
+      return "already-following" as const;
     },
   };
 }
@@ -529,4 +538,92 @@ test("fillQueue with empty allowedVerified keeps everyone (filter off)", async (
   const summary = await runner.runCycle();
   assert.equal(summary.skippedUnverified, 0);
   assert.equal(store.queueSize(), 2);
+});
+
+test("already-following candidates count separately and stay healthy", async () => {
+  const store = tmpStore();
+  store.setConsecutiveZeroCycles(3);
+  store.enqueue("alice");
+  store.enqueue("bob");
+  const search = fakeSearch({});
+  let t = 1000;
+  const runner = new AutoFollowRunner(search, store, alreadyFollowingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    now: () => new Date(t++),
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.addedCount, 0);          // no NEW follows
+  assert.equal(summary.alreadyFollowing, 2);    // both were already followed
+  assert.equal(summary.attempted, 2);
+  assert.equal(summary.consecutiveZeroCycles, 0); // healthy: session works
+  assert.equal(store.getConsecutiveZeroCycles(), 0);
+  assert.ok(store.getLastSuccessAt() !== null);
+});
+
+test("all-throw cycle increments the unhealthy counter", async () => {
+  const store = tmpStore();
+  store.enqueue("alice");
+  const search = fakeSearch({});
+  const runner = new AutoFollowRunner(search, store, failingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.addedCount, 0);
+  assert.equal(summary.alreadyFollowing, 0);
+  assert.equal(summary.attempted, 1);
+  assert.equal(summary.consecutiveZeroCycles, 1); // all attempts threw
+});
+
+test("followFailures counts only genuine throws, not already-following", async () => {
+  const store = tmpStore();
+  store.enqueue("newone"); // will follow
+  store.enqueue("existing"); // already following
+  store.enqueue("broken"); // throws
+  const search = fakeSearch({});
+  // Per-username outcomes: one new follow, one already-following, one failure.
+  const mixedFollower: IFollower = {
+    async follow(username: string) {
+      if (username === "existing") return "already-following" as const;
+      if (username === "broken") throw new Error("blocked");
+      return "followed" as const;
+    },
+  };
+  const runner = new AutoFollowRunner(search, store, mixedFollower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.attempted, 3);
+  assert.equal(summary.addedCount, 1); // "newone"
+  assert.equal(summary.alreadyFollowing, 1); // "existing"
+  assert.equal(summary.followFailures, 1); // only "broken", NOT "existing"
 });

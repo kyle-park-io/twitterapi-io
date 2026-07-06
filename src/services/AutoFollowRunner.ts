@@ -93,7 +93,9 @@ export interface CycleSummary {
   addedCount: number;
   /** Candidates this cycle tried to follow (0 in dry-run). */
   attempted: number;
-  /** attempted - addedCount for a real run; 0 in dry-run. */
+  /** Candidates already followed (no-op skip); 0 in dry-run. */
+  alreadyFollowing: number;
+  /** Follows that actually threw (attempted minus new follows minus already-following); 0 in dry-run. */
   followFailures: number;
   /** consecutiveZeroCycles value AFTER this cycle. */
   consecutiveZeroCycles: number;
@@ -146,20 +148,22 @@ export class AutoFollowRunner {
     const started = this.now();
     const followedCountBefore = this.store.followedCount();
     const fill = await this.fillQueue();
-    const { followed, attempted } = await this.drainQueue();
+    const { followed, attempted, alreadyFollowing } = await this.drainQueue();
     const followedCountAfter = this.store.followedCount();
     const finished = this.now();
 
     // Health assessment (real runs only). "Attempted but followed 0" is a
     // symptom; a cycle with nothing to attempt is not a failure.
     if (!this.options.dryRun) {
-      if (followed.length > 0) {
+      if (followed.length > 0 || alreadyFollowing > 0) {
+        // A real follow landed, or we confirmed existing follows — session works.
         this.store.setConsecutiveZeroCycles(0);
         this.store.setLastSuccessAt(finished);
       } else if (attempted > 0) {
+        // Attempted follows and every one threw.
         this.store.setConsecutiveZeroCycles(this.store.getConsecutiveZeroCycles() + 1);
       }
-      // attempted === 0 → leave counters untouched.
+      // attempted === 0 → nothing to do → leave counters untouched.
     }
 
     this.store.setLastRun(finished);
@@ -176,7 +180,8 @@ export class AutoFollowRunner {
       followedCountAfter,
       addedCount: this.options.dryRun ? 0 : followed.length,
       attempted,
-      followFailures: this.options.dryRun ? 0 : attempted - followed.length,
+      alreadyFollowing: this.options.dryRun ? 0 : alreadyFollowing,
+      followFailures: this.options.dryRun ? 0 : attempted - followed.length - alreadyFollowing,
       consecutiveZeroCycles: this.store.getConsecutiveZeroCycles(),
       followed,
       dryRun: this.options.dryRun,
@@ -243,7 +248,11 @@ export class AutoFollowRunner {
    * followed-set. A follow failure is logged and the candidate is dropped (not re-queued),
    * so a persistently unfollowable user cannot wedge the queue.
    */
-  private async drainQueue(): Promise<{ followed: FollowedCandidate[]; attempted: number }> {
+  private async drainQueue(): Promise<{
+    followed: FollowedCandidate[];
+    attempted: number;
+    alreadyFollowing: number;
+  }> {
     const toCandidate = (c: {
       userName: string;
       name?: string;
@@ -262,19 +271,25 @@ export class AutoFollowRunner {
     if (this.options.dryRun) {
       const targets = this.store.peek(this.options.maxPerRun);
       for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
-      return { followed: targets.map(toCandidate), attempted: 0 };
+      return { followed: targets.map(toCandidate), attempted: 0, alreadyFollowing: 0 };
     }
 
     const targets = this.store.dequeue(this.options.maxPerRun);
     const followed: FollowedCandidate[] = [];
+    let alreadyFollowing = 0;
     for (let i = 0; i < targets.length; i++) {
       const c = targets[i];
       try {
         if (i > 0) await sleep(this.delayMs());
-        await this.follower.follow(c.userName);
+        const result = await this.follower.follow(c.userName);
         this.store.add(c.userName);
-        followed.push(toCandidate(c));
-        console.log(`Followed @${c.userName}`);
+        if (result === "followed") {
+          followed.push(toCandidate(c));
+          console.log(`Followed @${c.userName}`);
+        } else {
+          alreadyFollowing++;
+          console.log(`Already following @${c.userName}`);
+        }
       } catch (err) {
         console.error(
           `Follow failed for @${c.userName}:`,
@@ -282,6 +297,6 @@ export class AutoFollowRunner {
         );
       }
     }
-    return { followed, attempted: targets.length };
+    return { followed, attempted: targets.length, alreadyFollowing };
   }
 }
