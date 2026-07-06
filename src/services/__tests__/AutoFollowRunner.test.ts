@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AutoFollowRunner } from "../AutoFollowRunner";
+import { AutoFollowRunner, isUnhealthy } from "../AutoFollowRunner";
 import { FollowStore } from "../FollowStore";
 import { IFollower } from "../../follow/IFollower";
 import * as fs from "fs";
@@ -305,4 +305,115 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
   assert.equal(summary.followed[0].userName, "alice");
   assert.equal(summary.followed[0].url, "https://x.com/alice");
   assert.equal(summary.followed[0].keyword, "kw1");
+});
+
+function failingFollower(): IFollower {
+  return {
+    async follow(_username: string) {
+      throw new Error("blocked");
+    },
+  };
+}
+
+test("attempted-but-followed-0 increments consecutiveZeroCycles", async () => {
+  const store = tmpStore();
+  store.enqueue("alice");
+  store.enqueue("bob");
+  const search = fakeSearch({}); // no new candidates; drain the pre-queued ones
+  const runner = new AutoFollowRunner(search, store, failingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]), // empty batch → no search, just drain
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.attempted, 2);
+  assert.equal(summary.addedCount, 0);
+  assert.equal(summary.followFailures, 2);
+  assert.equal(summary.consecutiveZeroCycles, 1);
+  assert.equal(store.getConsecutiveZeroCycles(), 1);
+});
+
+test("a successful cycle resets the counter and sets lastSuccessAt", async () => {
+  const store = tmpStore();
+  store.setConsecutiveZeroCycles(5);
+  store.enqueue("alice");
+  const search = fakeSearch({});
+  let t = 1000;
+  const runner = new AutoFollowRunner(search, store, recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    now: () => new Date(t++),
+    pickKeywords: scriptedPicker([[]]),
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.addedCount, 1);
+  assert.equal(summary.consecutiveZeroCycles, 0);
+  assert.equal(store.getConsecutiveZeroCycles(), 0);
+  assert.ok(store.getLastSuccessAt() !== null);
+});
+
+test("a cycle with nothing to attempt leaves the counter untouched", async () => {
+  const store = tmpStore();
+  store.setConsecutiveZeroCycles(3);
+  const search = fakeSearch({}); // empty queue + empty search = nothing to drain
+  const runner = new AutoFollowRunner(search, store, failingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.attempted, 0);
+  assert.equal(summary.consecutiveZeroCycles, 3); // unchanged
+  assert.equal(store.getConsecutiveZeroCycles(), 3);
+});
+
+test("dry-run never touches the health counter", async () => {
+  const store = tmpStore();
+  store.setConsecutiveZeroCycles(4);
+  store.enqueue("alice");
+  const search = fakeSearch({});
+  const runner = new AutoFollowRunner(search, store, failingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.attempted, 0); // dry-run attempts nothing
+  assert.equal(summary.consecutiveZeroCycles, 4); // unchanged
+  assert.equal(store.getConsecutiveZeroCycles(), 4);
+});
+
+test("isUnhealthy compares against threshold", () => {
+  assert.equal(isUnhealthy(2, 2), true);
+  assert.equal(isUnhealthy(3, 2), true);
+  assert.equal(isUnhealthy(1, 2), false);
+  assert.equal(isUnhealthy(0, 2), false);
 });

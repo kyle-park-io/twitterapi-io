@@ -51,9 +51,19 @@ export interface CycleSummary {
   followedCountAfter: number;
   /** Newly followed this cycle (real follows only; 0 in dry-run). */
   addedCount: number;
+  /** Candidates this cycle tried to follow (0 in dry-run). */
+  attempted: number;
+  /** attempted - addedCount for a real run; 0 in dry-run. */
+  followFailures: number;
+  /** consecutiveZeroCycles value AFTER this cycle. */
+  consecutiveZeroCycles: number;
   /** Followed (or, in dry-run, would-follow) candidates with metadata. */
   followed: FollowedCandidate[];
   dryRun: boolean;
+}
+
+export function isUnhealthy(consecutiveZeroCycles: number, threshold: number): boolean {
+  return consecutiveZeroCycles >= threshold;
 }
 
 function randomDelayMs(): number {
@@ -94,11 +104,25 @@ export class AutoFollowRunner {
     const started = this.now();
     const followedCountBefore = this.store.followedCount();
     const fill = await this.fillQueue();
-    const followed = await this.drainQueue();
+    const { followed, attempted } = await this.drainQueue();
     const followedCountAfter = this.store.followedCount();
     const finished = this.now();
+
+    // Health assessment (real runs only). "Attempted but followed 0" is a
+    // symptom; a cycle with nothing to attempt is not a failure.
+    if (!this.options.dryRun) {
+      if (followed.length > 0) {
+        this.store.setConsecutiveZeroCycles(0);
+        this.store.setLastSuccessAt(finished);
+      } else if (attempted > 0) {
+        this.store.setConsecutiveZeroCycles(this.store.getConsecutiveZeroCycles() + 1);
+      }
+      // attempted === 0 → leave counters untouched.
+    }
+
     this.store.setLastRun(finished);
     this.store.save();
+
     return {
       startedAt: started.toISOString(),
       finishedAt: finished.toISOString(),
@@ -108,6 +132,9 @@ export class AutoFollowRunner {
       followedCountBefore,
       followedCountAfter,
       addedCount: this.options.dryRun ? 0 : followed.length,
+      attempted,
+      followFailures: this.options.dryRun ? 0 : attempted - followed.length,
+      consecutiveZeroCycles: this.store.getConsecutiveZeroCycles(),
       followed,
       dryRun: this.options.dryRun,
     };
@@ -164,7 +191,7 @@ export class AutoFollowRunner {
    * followed-set. A follow failure is logged and the candidate is dropped (not re-queued),
    * so a persistently unfollowable user cannot wedge the queue.
    */
-  private async drainQueue(): Promise<FollowedCandidate[]> {
+  private async drainQueue(): Promise<{ followed: FollowedCandidate[]; attempted: number }> {
     const toCandidate = (c: {
       userName: string;
       name?: string;
@@ -179,7 +206,7 @@ export class AutoFollowRunner {
     if (this.options.dryRun) {
       const targets = this.store.peek(this.options.maxPerRun);
       for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
-      return targets.map(toCandidate);
+      return { followed: targets.map(toCandidate), attempted: 0 };
     }
 
     const targets = this.store.dequeue(this.options.maxPerRun);
@@ -199,6 +226,6 @@ export class AutoFollowRunner {
         );
       }
     }
-    return followed;
+    return { followed, attempted: targets.length };
   }
 }
