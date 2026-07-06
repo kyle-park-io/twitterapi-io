@@ -1,4 +1,4 @@
-import { loadAutoFollowConfig } from "../config";
+import { resolveStorageStatePath } from "../config";
 import { chromium } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
@@ -14,7 +14,7 @@ import * as path from "path";
  * the terminal and press Enter.
  */
 async function main() {
-  const config = loadAutoFollowConfig();
+  const storageStatePath = resolveStorageStatePath();
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -30,9 +30,9 @@ async function main() {
     process.stdin.once("data", () => resolve());
   });
 
-  fs.mkdirSync(path.dirname(config.storageStatePath), { recursive: true });
-  await context.storageState({ path: config.storageStatePath });
-  console.log(`\nSession saved to ${config.storageStatePath}`);
+  fs.mkdirSync(path.dirname(storageStatePath), { recursive: true });
+  await context.storageState({ path: storageStatePath });
+  console.log(`\nSession saved to ${storageStatePath}`);
   console.log("You can now run: pnpm example:auto-follow");
 
   await browser.close();

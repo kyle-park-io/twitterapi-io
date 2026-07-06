@@ -25,6 +25,10 @@ export function loadConfig(): Config {
   return { apiKey: requireEnv("TWITTERAPI_IO_KEY") };
 }
 
+export function resolveStorageStatePath(): string {
+  return path.join(process.cwd(), ".auth", "x-session.json");
+}
+
 export function loadWriteConfig(): WriteConfig {
   return {
     apiKey: requireEnv("TWITTERAPI_IO_KEY"),
@@ -122,7 +126,7 @@ export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowC
     keywordsPerCycle: pick(file.keywordsPerCycle, flags.keywordsPerCycle, 3),
     maxPerRun: pick(file.maxPerRun, flags.maxPerRun, 25),
     dryRun: pick(file.dryRun, flags.dryRun, true),
-    storageStatePath: path.join(process.cwd(), ".auth", "x-session.json"),
+    storageStatePath: resolveStorageStatePath(),
     statePath: path.join(process.cwd(), ".auth", "auto-follow-state.json"),
   };
 }

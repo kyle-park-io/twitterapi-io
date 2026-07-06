@@ -1,4 +1,4 @@
-import { loadAutoFollowConfig } from "../config";
+import { resolveStorageStatePath } from "../config";
 import { buildStorageState } from "../services/SessionState";
 import { chromium } from "playwright";
 import * as fs from "fs";
@@ -37,19 +37,19 @@ async function main() {
     process.exit(1);
   }
 
-  const config = loadAutoFollowConfig();
+  const storageStatePath = resolveStorageStatePath();
   const state = buildStorageState(authToken, ct0);
 
-  fs.mkdirSync(path.dirname(config.storageStatePath), { recursive: true });
-  fs.writeFileSync(config.storageStatePath, JSON.stringify(state, null, 2));
-  console.log(`Session written to ${config.storageStatePath}`);
+  fs.mkdirSync(path.dirname(storageStatePath), { recursive: true });
+  fs.writeFileSync(storageStatePath, JSON.stringify(state, null, 2));
+  console.log(`Session written to ${storageStatePath}`);
 
   // Self-verify: load the session headless and confirm we're logged in, using
   // the same signal BrowserFollowService uses.
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({
-      storageState: config.storageStatePath,
+      storageState: storageStatePath,
     });
     const page = await context.newPage();
     await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
