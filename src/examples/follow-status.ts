@@ -14,6 +14,12 @@ import * as path from "path";
  * (state + config + JSONL log) — no API call, no env vars — so it's always safe
  * to run:  pnpm follow-status
  */
+/** Format a stored (UTC) timestamp for display in Korea time. */
+function kst(date: Date | null): string {
+  if (!date) return "never";
+  return date.toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) + " KST";
+}
+
 function ago(date: Date | null): string {
   if (!date) return "never";
   const ms = Date.now() - date.getTime();
@@ -73,8 +79,8 @@ function main() {
   const spark = recent.length ? recent.map((n) => `+${n}`).join(" ") : "(no log yet)";
 
   console.log(`Auto-follow status: ${unhealthy ? "⚠️ UNHEALTHY" : "✅ HEALTHY"}`);
-  console.log(`  Last run:        ${store.getLastRun()?.toISOString() ?? "never"} (${ago(store.getLastRun())})`);
-  console.log(`  Last success:    ${store.getLastSuccessAt()?.toISOString() ?? "never"} (${ago(store.getLastSuccessAt())})`);
+  console.log(`  Last run:        ${kst(store.getLastRun())} (${ago(store.getLastRun())})`);
+  console.log(`  Last success:    ${kst(store.getLastSuccessAt())} (${ago(store.getLastSuccessAt())})`);
   console.log(`  Consecutive zero-follow cycles: ${zero} (threshold ${threshold})`);
   console.log(`  Followed (local): ${store.followedCount()}    Queue: ${store.queueSize()}`);
   console.log(`  Recent cycles (added): ${spark}`);

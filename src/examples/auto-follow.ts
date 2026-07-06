@@ -11,6 +11,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Format a timestamp for human-readable logs in Korea time. */
+function kst(date: Date | null): string {
+  if (!date) return "never";
+  return date.toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) + " KST";
+}
+
 const LOG_PATH = path.join(process.cwd(), "output", "auto-follow-log.jsonl");
 
 function appendLog(record: unknown): void {
@@ -75,7 +81,7 @@ async function main() {
 
   while (!stopping) {
     const started = new Date();
-    console.log(`\n[${started.toISOString()}] Running cycle...`);
+    console.log(`\n[${kst(started)}] Running cycle...`);
     try {
       const summary = await runner.runCycle();
       console.log(
@@ -87,7 +93,7 @@ async function main() {
         console.error(
           `\n⚠️⚠️⚠️  UNHEALTHY: ${summary.consecutiveZeroCycles} consecutive cycles ` +
             `followed 0 of ${summary.attempted} attempted.\n` +
-            `        Last success: ${store.getLastSuccessAt()?.toISOString() ?? "never"}.\n` +
+            `        Last success: ${kst(store.getLastSuccessAt())}.\n` +
             `        The account may be banned, the session may have expired, or X may\n` +
             `        be blocking follows. Check with: pnpm follow-status\n`
         );
