@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { FollowStore } from "../FollowStore";
+import { FollowStore, Candidate } from "../FollowStore";
 
 function tmpFile(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fs-")), "state.json");
@@ -84,10 +84,10 @@ test("dequeue returns up to n usernames in FIFO order and removes them", () => {
   store.enqueue("b");
   store.enqueue("c");
   const first = store.dequeue(2);
-  assert.deepEqual(first, ["a", "b"]);
+  assert.deepEqual(first, [{ userName: "a" }, { userName: "b" }]);
   assert.equal(store.queueSize(), 1);
   const rest = store.dequeue(5); // more than available
-  assert.deepEqual(rest, ["c"]);
+  assert.deepEqual(rest, [{ userName: "c" }]);
   assert.equal(store.queueSize(), 0);
 });
 
@@ -96,7 +96,7 @@ test("peek returns queued usernames without removing them", () => {
   store.load();
   store.enqueue("a");
   store.enqueue("b");
-  assert.deepEqual(store.peek(1), ["a"]);
+  assert.deepEqual(store.peek(1), [{ userName: "a" }]);
   assert.equal(store.queueSize(), 2); // peek does not consume
 });
 
@@ -111,5 +111,69 @@ test("queue round-trips through save/load", () => {
   const b = new FollowStore(file);
   b.load();
   assert.equal(b.queueSize(), 2);
-  assert.deepEqual(b.dequeue(2), ["x", "y"]);
+  assert.deepEqual(b.dequeue(2), [{ userName: "x" }, { userName: "y" }]);
+});
+
+test("loads a queue mixing bare strings and candidate objects", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      followed: [],
+      queue: ["alice", { userName: "bob", name: "Bob", keyword: "AI" }],
+      lastRun: null,
+    })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.queueSize(), 2);
+  const peeked = store.peek(2);
+  assert.deepEqual(peeked[0], { userName: "alice" });
+  assert.deepEqual(peeked[1], { userName: "bob", name: "Bob", keyword: "AI" });
+});
+
+test("enqueue stores metadata and round-trips through save/load", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  store.enqueue("carol", { name: "Carol", keyword: "crypto" });
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.dequeue(1), [
+    { userName: "carol", name: "Carol", keyword: "crypto" },
+  ]);
+});
+
+test("dequeue returns candidate objects and removes them", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("alice");
+  store.enqueue("bob", { name: "Bob" });
+  const taken = store.dequeue(1);
+  assert.deepEqual(taken, [{ userName: "alice" }]);
+  assert.equal(store.queueSize(), 1);
+});
+
+test("dedupe is by lowercased userName across string and object forms", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ followed: [], queue: ["Alice"], lastRun: null })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  store.enqueue("alice", { name: "A" }); // already queued as "Alice"
+  assert.equal(store.queueSize(), 1);
+});
+
+test("followedCount reflects adds", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  assert.equal(store.followedCount(), 0);
+  store.add("alice");
+  store.add("Alice"); // case-insensitive, same person
+  store.add("bob");
+  assert.equal(store.followedCount(), 2);
 });

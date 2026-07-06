@@ -1,16 +1,28 @@
 import * as fs from "fs";
 import * as path from "path";
 
+export interface Candidate {
+  userName: string;
+  name?: string;
+  keyword?: string;
+}
+
 interface FollowStoreData {
   followed: string[];
-  queue: string[];
+  queue: Array<string | Candidate>;
   lastRun: string | null;
+}
+
+function normalizeCandidate(item: string | Candidate): Candidate | null {
+  if (typeof item === "string") return { userName: item };
+  if (item && typeof item.userName === "string") return item;
+  return null; // malformed entry — skip, don't crash
 }
 
 export class FollowStore {
   private followed = new Set<string>();
-  /** Pending candidates to follow, in FIFO order. Stored as-typed; deduped via queuedKeys. */
-  private queue: string[] = [];
+  /** Pending candidates to follow, in FIFO order. Deduped via queuedKeys. */
+  private queue: Candidate[] = [];
   private queuedKeys = new Set<string>();
   private lastRun: Date | null = null;
 
@@ -21,8 +33,10 @@ export class FollowStore {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const data = JSON.parse(raw) as FollowStoreData;
       this.followed = new Set((data.followed ?? []).map((u) => u.toLowerCase()));
-      this.queue = [...(data.queue ?? [])];
-      this.queuedKeys = new Set(this.queue.map((u) => u.toLowerCase()));
+      this.queue = (data.queue ?? [])
+        .map(normalizeCandidate)
+        .filter((c): c is Candidate => c !== null);
+      this.queuedKeys = new Set(this.queue.map((c) => c.userName.toLowerCase()));
       this.lastRun = data.lastRun ? new Date(data.lastRun) : null;
     } catch {
       this.followed = new Set();
@@ -40,11 +54,15 @@ export class FollowStore {
     this.followed.add(username.toLowerCase());
   }
 
+  followedCount(): number {
+    return this.followed.size;
+  }
+
   /** Queue a candidate to follow later. Skips users already followed or already queued. */
-  enqueue(username: string): void {
+  enqueue(username: string, meta?: { name?: string; keyword?: string }): void {
     const key = username.toLowerCase();
     if (this.followed.has(key) || this.queuedKeys.has(key)) return;
-    this.queue.push(username);
+    this.queue.push({ userName: username, ...meta });
     this.queuedKeys.add(key);
   }
 
@@ -56,15 +74,15 @@ export class FollowStore {
     return this.queue.length;
   }
 
-  /** Return up to `n` queued usernames in FIFO order WITHOUT removing them. */
-  peek(n: number): string[] {
+  /** Return up to `n` queued candidates in FIFO order WITHOUT removing them. */
+  peek(n: number): Candidate[] {
     return this.queue.slice(0, n);
   }
 
-  /** Remove and return up to `n` queued usernames in FIFO order. */
-  dequeue(n: number): string[] {
+  /** Remove and return up to `n` queued candidates in FIFO order. */
+  dequeue(n: number): Candidate[] {
     const taken = this.queue.splice(0, n);
-    for (const u of taken) this.queuedKeys.delete(u.toLowerCase());
+    for (const c of taken) this.queuedKeys.delete(c.userName.toLowerCase());
     return taken;
   }
 
