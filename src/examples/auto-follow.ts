@@ -1,6 +1,7 @@
 import { loadAutoFollowConfig } from "../config";
 import { TwitterClient } from "../client/TwitterClient";
 import { TweetService } from "../services/TweetService";
+import { UserService } from "../services/UserService";
 import { FollowStore } from "../services/FollowStore";
 import { BrowserFollowService } from "../services/BrowserFollowService";
 import { AutoFollowRunner, isUnhealthy } from "../services/AutoFollowRunner";
@@ -29,10 +30,25 @@ function appendLog(record: unknown): void {
   }
 }
 
+async function syncFollowing(
+  users: UserService,
+  store: FollowStore,
+  xUser: string
+): Promise<number> {
+  let n = 0;
+  for await (const f of users.getFollowings(xUser)) {
+    store.add(f.userName);
+    n++;
+  }
+  store.save();
+  return n;
+}
+
 async function main() {
   const config = loadAutoFollowConfig();
   const client = new TwitterClient(config.apiKey);
   const tweets = new TweetService(client);
+  const users = new UserService(client);
 
   const store = new FollowStore(config.statePath);
   store.load();
@@ -78,6 +94,18 @@ async function main() {
     console.log("Logging in to X via browser...");
     await follower.login();
     console.log("Logged in.");
+
+    // Best-effort: merge the account's real following list into the followed-set
+    // so already-followed accounts stop being queued. If it fails, warn and keep
+    // going — a redundant follow attempt later is a harmless no-op.
+    try {
+      const n = await syncFollowing(users, store, config.xUser);
+      console.log(`Synced ${n} existing follows from X.`);
+    } catch (err) {
+      console.error(
+        `Following sync failed (continuing anyway): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   // Respect the interval across restarts. If we were restarted (e.g. WSL was
@@ -106,7 +134,8 @@ async function main() {
       const summary = await runner.runCycle();
       console.log(
         `Cycle done — scanned ${summary.scanned}, ` +
-          `queued ${summary.queued}, followed ${summary.followed.length}`
+          `queued ${summary.queued}, followed ${summary.followed.length}, ` +
+          `already-following ${summary.alreadyFollowing}`
       );
       appendLog({ type: "cycle", ...summary });
       if (!summary.dryRun && isUnhealthy(summary.consecutiveZeroCycles, config.unhealthyAfterZeroCycles)) {
