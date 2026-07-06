@@ -52,6 +52,7 @@ export interface AutoFollowConfig {
   perKeyword: number;
   keywordsPerCycle: number;
   maxPerRun: number;
+  unhealthyAfterZeroCycles: number;
   dryRun: boolean;
   storageStatePath: string;
   statePath: string;
@@ -64,6 +65,7 @@ interface AutoFollowFile {
   perKeyword?: number;
   keywordsPerCycle?: number;
   maxPerRun?: number;
+  unhealthyAfterZeroCycles?: number;
   dryRun?: boolean;
 }
 
@@ -72,6 +74,7 @@ function parseAutoFollowFlags(argv: string[]): {
   perKeyword?: number;
   keywordsPerCycle?: number;
   maxPerRun?: number;
+  unhealthyAfterZeroCycles?: number;
   dryRun?: boolean;
 } {
   const args = argv.slice(2);
@@ -80,6 +83,7 @@ function parseAutoFollowFlags(argv: string[]): {
     perKeyword?: number;
     keywordsPerCycle?: number;
     maxPerRun?: number;
+    unhealthyAfterZeroCycles?: number;
     dryRun?: boolean;
   } = {};
   for (let i = 0; i < args.length; i++) {
@@ -91,6 +95,8 @@ function parseAutoFollowFlags(argv: string[]): {
       flags.keywordsPerCycle = parseInt(args[++i], 10);
     } else if (args[i] === "--max" && args[i + 1]) {
       flags.maxPerRun = parseInt(args[++i], 10);
+    } else if (args[i] === "--unhealthy-after" && args[i + 1]) {
+      flags.unhealthyAfterZeroCycles = parseInt(args[++i], 10);
     } else if (args[i] === "--dry-run") {
       flags.dryRun = true;
     } else if (args[i] === "--no-dry-run") {
@@ -125,6 +131,7 @@ export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowC
     perKeyword: pick(file.perKeyword, flags.perKeyword, 30),
     keywordsPerCycle: pick(file.keywordsPerCycle, flags.keywordsPerCycle, 3),
     maxPerRun: pick(file.maxPerRun, flags.maxPerRun, 25),
+    unhealthyAfterZeroCycles: pick(file.unhealthyAfterZeroCycles, flags.unhealthyAfterZeroCycles, 2),
     dryRun: pick(file.dryRun, flags.dryRun, true),
     storageStatePath: resolveStorageStatePath(),
     statePath: path.join(process.cwd(), ".auth", "auto-follow-state.json"),

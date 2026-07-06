@@ -115,6 +115,20 @@ It looks up the account's real following count via the read API and appends an
 The two won't match exactly (you also follow/unfollow by hand); an approximate
 match means it's working. Requires `X_USER` and `TWITTERAPI_IO_KEY`.
 
+Because the tool runs unattended, it self-monitors. Each real cycle that tries
+to follow people but lands none increments a counter; any successful cycle
+resets it. After `unhealthyAfterZeroCycles` (default 2) consecutive zero-follow
+cycles it logs a loud `⚠️ UNHEALTHY` warning — the account may be banned, the
+session may have expired, or X may be blocking follows. Check anytime with:
+
+```bash
+pnpm follow-status
+```
+
+`follow-status` reads only local files (no API call, no env vars) and prints a
+`✅ HEALTHY` / `⚠️ UNHEALTHY` verdict with the last run/success times, the
+consecutive zero-follow count, and the last few cycles' follow counts.
+
 Requires `X_AUTH_TOKEN` / `X_CT0` (see below) for the imported browser session.
 
 ## Interactive CLI

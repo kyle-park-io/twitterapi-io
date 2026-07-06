@@ -3,7 +3,7 @@ import { TwitterClient } from "../client/TwitterClient";
 import { TweetService } from "../services/TweetService";
 import { FollowStore } from "../services/FollowStore";
 import { BrowserFollowService } from "../services/BrowserFollowService";
-import { AutoFollowRunner } from "../services/AutoFollowRunner";
+import { AutoFollowRunner, isUnhealthy } from "../services/AutoFollowRunner";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -79,6 +79,15 @@ async function main() {
           `queued ${summary.queued}, followed ${summary.followed.length}`
       );
       appendLog({ type: "cycle", ...summary });
+      if (!summary.dryRun && isUnhealthy(summary.consecutiveZeroCycles, config.unhealthyAfterZeroCycles)) {
+        console.error(
+          `\n⚠️⚠️⚠️  UNHEALTHY: ${summary.consecutiveZeroCycles} consecutive cycles ` +
+            `followed 0 of ${summary.attempted} attempted.\n` +
+            `        Last success: ${store.getLastSuccessAt()?.toISOString() ?? "never"}.\n` +
+            `        The account may be banned, the session may have expired, or X may\n` +
+            `        be blocking follows. Check with: pnpm follow-status\n`
+        );
+      }
     } catch (err) {
       console.error("Cycle error:", err instanceof Error ? err.message : String(err));
     }

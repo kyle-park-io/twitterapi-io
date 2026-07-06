@@ -46,5 +46,6 @@
   "perKeyword": 30,
   "keywordsPerCycle": 3,
   "maxPerRun": 25,
+  "unhealthyAfterZeroCycles": 2,
   "dryRun": true
 }

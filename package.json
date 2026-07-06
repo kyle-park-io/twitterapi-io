@@ -19,7 +19,8 @@
     "example:auto-follow": "ts-node src/examples/auto-follow.ts",
     "save-session": "ts-node src/examples/save-session.ts",
     "import-session": "ts-node src/examples/import-session.ts",
-    "follow-audit": "ts-node src/examples/follow-audit.ts"
+    "follow-audit": "ts-node src/examples/follow-audit.ts",
+    "follow-status": "ts-node src/examples/follow-status.ts"
   },
   "repository": {
     "type": "git",
