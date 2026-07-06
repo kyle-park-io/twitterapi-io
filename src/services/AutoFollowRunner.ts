@@ -1,6 +1,37 @@
 import { IFollower } from "../follow/IFollower";
 import { FollowStore } from "./FollowStore";
 
+export type VerifiedTier = "blue" | "legacy" | "business" | "government";
+
+interface AuthorVerification {
+  isVerified?: boolean;
+  isBlueVerified?: boolean;
+  verifiedType?: string | null;
+}
+
+/** The verification tiers an author holds (may be several, or none). */
+export function authorTiers(author: AuthorVerification): VerifiedTier[] {
+  const tiers: VerifiedTier[] = [];
+  if (author.isBlueVerified === true) tiers.push("blue");
+  if (author.isVerified === true) tiers.push("legacy");
+  if (author.verifiedType === "Business") tiers.push("business");
+  if (author.verifiedType === "Government") tiers.push("government");
+  return tiers;
+}
+
+/**
+ * True if the author may be followed under `allowed`. Empty `allowed` = filter
+ * off (always true). Otherwise true iff the author holds a tier in `allowed`.
+ */
+export function passesVerifiedFilter(
+  author: AuthorVerification,
+  allowed: VerifiedTier[]
+): boolean {
+  if (allowed.length === 0) return true;
+  const held = authorTiers(author);
+  return held.some((t) => allowed.includes(t));
+}
+
 interface AuthoredTweet {
   author?: { userName: string; name: string };
 }

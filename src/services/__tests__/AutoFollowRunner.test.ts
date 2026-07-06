@@ -417,3 +417,36 @@ test("isUnhealthy compares against threshold", () => {
   assert.equal(isUnhealthy(1, 2), false);
   assert.equal(isUnhealthy(0, 2), false);
 });
+
+import { authorTiers, passesVerifiedFilter } from "../AutoFollowRunner";
+
+test("authorTiers maps each signal to its tier", () => {
+  assert.deepEqual(authorTiers({ isBlueVerified: true }), ["blue"]);
+  assert.deepEqual(authorTiers({ isVerified: true }), ["legacy"]);
+  assert.deepEqual(authorTiers({ verifiedType: "Business" }), ["business"]);
+  assert.deepEqual(authorTiers({ verifiedType: "Government" }), ["government"]);
+});
+
+test("authorTiers returns all held tiers, or none", () => {
+  assert.deepEqual(
+    authorTiers({ isBlueVerified: true, verifiedType: "Business" }).sort(),
+    ["blue", "business"]
+  );
+  assert.deepEqual(authorTiers({ isBlueVerified: false, isVerified: false, verifiedType: null }), []);
+  assert.deepEqual(authorTiers({}), []);
+});
+
+test("passesVerifiedFilter: empty allowed means filter off", () => {
+  assert.equal(passesVerifiedFilter({}, []), true);
+  assert.equal(passesVerifiedFilter({ isBlueVerified: false }, []), true);
+});
+
+test("passesVerifiedFilter matches when a held tier is allowed", () => {
+  assert.equal(passesVerifiedFilter({ isBlueVerified: true }, ["blue"]), true);
+  assert.equal(passesVerifiedFilter({ verifiedType: "Business" }, ["blue", "business"]), true);
+});
+
+test("passesVerifiedFilter rejects when no held tier is allowed", () => {
+  assert.equal(passesVerifiedFilter({ verifiedType: "Business" }, ["blue"]), false);
+  assert.equal(passesVerifiedFilter({}, ["blue"]), false);
+});
