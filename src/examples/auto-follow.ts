@@ -79,6 +79,25 @@ async function main() {
     console.log("Logged in.");
   }
 
+  // Respect the interval across restarts. If we were restarted (e.g. WSL was
+  // shut down and came back) less than one interval after the last cycle, wait
+  // out the remainder instead of firing a cycle immediately — otherwise a flappy
+  // WSL VM could follow far faster than intervalMinutes and trip rate limits.
+  const lastRun = store.getLastRun();
+  if (lastRun) {
+    const intervalMs = config.intervalMinutes * 60_000;
+    // Cap the wait at one interval so a bad clock can't wedge us forever.
+    const waitMs = Math.min(intervalMs, lastRun.getTime() + intervalMs - Date.now());
+    if (waitMs > 0) {
+      const mins = Math.ceil(waitMs / 60_000);
+      console.log(
+        `Last cycle was ${kst(lastRun)}; waiting ~${mins}m to respect the ` +
+          `${config.intervalMinutes}m interval before the next cycle...`
+      );
+      await sleep(waitMs);
+    }
+  }
+
   while (!stopping) {
     const started = new Date();
     console.log(`\n[${kst(started)}] Running cycle...`);
