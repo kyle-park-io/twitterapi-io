@@ -47,5 +47,6 @@
   "keywordsPerCycle": 3,
   "maxPerRun": 25,
   "unhealthyAfterZeroCycles": 2,
+  "allowedVerified": ["blue", "legacy", "business", "government"],
   "dryRun": true
 }

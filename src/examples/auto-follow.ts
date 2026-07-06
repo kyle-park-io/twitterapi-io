@@ -56,7 +56,7 @@ async function main() {
     keywordsPerCycle: config.keywordsPerCycle,
     maxPerRun: config.maxPerRun,
     dryRun: config.dryRun,
-    allowedVerified: [],
+    allowedVerified: config.allowedVerified,
   });
 
   let stopping = false;

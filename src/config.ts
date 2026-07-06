@@ -1,6 +1,7 @@
 import * as dotenv from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
+import type { VerifiedTier } from "./services/AutoFollowRunner";
 dotenv.config();
 
 export interface Config {
@@ -53,6 +54,7 @@ export interface AutoFollowConfig {
   keywordsPerCycle: number;
   maxPerRun: number;
   unhealthyAfterZeroCycles: number;
+  allowedVerified: VerifiedTier[];
   dryRun: boolean;
   storageStatePath: string;
   statePath: string;
@@ -66,6 +68,7 @@ interface AutoFollowFile {
   keywordsPerCycle?: number;
   maxPerRun?: number;
   unhealthyAfterZeroCycles?: number;
+  allowedVerified?: string[];
   dryRun?: boolean;
 }
 
@@ -106,6 +109,21 @@ function parseAutoFollowFlags(argv: string[]): {
   return flags;
 }
 
+const VERIFIED_TIERS = ["blue", "legacy", "business", "government"] as const;
+
+function resolveAllowedVerified(fromFile: string[] | undefined): VerifiedTier[] {
+  const raw = fromFile ?? ["blue", "legacy", "business", "government"];
+  const valid: VerifiedTier[] = [];
+  for (const t of raw) {
+    if ((VERIFIED_TIERS as readonly string[]).includes(t)) {
+      valid.push(t as VerifiedTier);
+    } else {
+      console.warn(`Ignoring unknown allowedVerified tier: "${t}"`);
+    }
+  }
+  return valid;
+}
+
 export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowConfig {
   const filePath = path.join(process.cwd(), "config", "auto-follow.json");
   const file: AutoFollowFile = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -132,6 +150,7 @@ export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowC
     keywordsPerCycle: pick(file.keywordsPerCycle, flags.keywordsPerCycle, 3),
     maxPerRun: pick(file.maxPerRun, flags.maxPerRun, 25),
     unhealthyAfterZeroCycles: pick(file.unhealthyAfterZeroCycles, flags.unhealthyAfterZeroCycles, 2),
+    allowedVerified: resolveAllowedVerified(file.allowedVerified),
     dryRun: pick(file.dryRun, flags.dryRun, true),
     storageStatePath: resolveStorageStatePath(),
     statePath: path.join(process.cwd(), ".auth", "auto-follow-state.json"),

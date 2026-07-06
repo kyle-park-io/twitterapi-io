@@ -88,6 +88,13 @@ config sets every tunable field, so tune behavior by editing the JSON:
 | `keywordsPerCycle` | Keywords sampled per search batch (default 3). |
 | `perKeyword` | Max tweets scanned per sampled keyword (default 30). |
 | `maxPerRun` | Max follows per cycle, and the queue top-up target (default 25). |
+| `allowedVerified` | Verification tiers to follow: any of `blue` (X Premium), `legacy`, `business`, `government`. Default all four (follow any verified account, skip unverified). Empty array `[]` turns the filter off (follow everyone). |
+
+The tool reads each search author's verification signals and follows only
+accounts whose tier is in `allowedVerified`. Set it to `["blue"]` to follow only
+X Premium accounts, or `[]` to disable the filter. Each cycle's JSONL record
+includes a `skippedUnverified` count and the matched tiers on every followed
+account.
 
 CLI flags (`--interval <min>`, `--keywords-per-cycle <n>`, `--per-keyword <n>`,
 `--max <n>`, `--dry-run` / `--no-dry-run`) take effect only for fields you
