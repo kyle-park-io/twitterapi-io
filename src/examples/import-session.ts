@@ -53,9 +53,14 @@ async function main() {
     });
     const page = await context.newPage();
     await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
+    // Wait for the account switcher to render — the timeline is a SPA, so right
+    // after domcontentloaded the sidebar isn't drawn yet. isVisible() is an
+    // instantaneous check (its timeout doesn't wait for the element to appear),
+    // so use waitFor() to actually poll until it shows up or the timeout fires.
     const loggedIn = await page
       .getByTestId("SideNav_AccountSwitcher_Button")
-      .isVisible({ timeout: 15000 })
+      .waitFor({ state: "visible", timeout: 15000 })
+      .then(() => true)
       .catch(() => false);
 
     if (loggedIn) {

@@ -31,12 +31,16 @@ export class BrowserFollowService implements IFollower {
     );
 
     if (hasSession) {
-      // Verify the saved session is still valid.
+      // Verify the saved session is still valid. The timeline is a SPA, so wait
+      // for the account switcher to render rather than snapshotting visibility
+      // right after domcontentloaded — isVisible() would return false before the
+      // sidebar is drawn and wrongly send us into the (X-blocked) login flow.
       const page = await this.context.newPage();
       await page.goto("https://x.com/home", { waitUntil: "domcontentloaded" });
       const loggedIn = await page
         .getByTestId("SideNav_AccountSwitcher_Button")
-        .isVisible()
+        .waitFor({ state: "visible", timeout: 15000 })
+        .then(() => true)
         .catch(() => false);
       await page.close();
       if (loggedIn) return;
