@@ -5,6 +5,7 @@ export interface Candidate {
   userName: string;
   name?: string;
   keyword?: string;
+  verified?: string[];
 }
 
 interface FollowStoreData {
@@ -67,7 +68,10 @@ export class FollowStore {
   }
 
   /** Queue a candidate to follow later. Skips users already followed or already queued. */
-  enqueue(username: string, meta?: { name?: string; keyword?: string }): void {
+  enqueue(
+    username: string,
+    meta?: { name?: string; keyword?: string; verified?: string[] }
+  ): void {
     const key = username.toLowerCase();
     if (this.followed.has(key) || this.queuedKeys.has(key)) return;
     this.queue.push({ userName: username, ...meta });

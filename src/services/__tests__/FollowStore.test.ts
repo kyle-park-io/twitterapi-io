@@ -207,3 +207,16 @@ test("health fields round-trip through save/load", () => {
   assert.equal(reloaded.getConsecutiveZeroCycles(), 3);
   assert.equal(reloaded.getLastSuccessAt()?.toISOString(), when.toISOString());
 });
+
+test("enqueue stores verified tiers and round-trips", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  store.enqueue("carol", { name: "Carol", keyword: "AI", verified: ["blue"] });
+  store.save();
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.deepEqual(reloaded.dequeue(1), [
+    { userName: "carol", name: "Carol", keyword: "AI", verified: ["blue"] },
+  ]);
+});

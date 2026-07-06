@@ -33,7 +33,13 @@ export function passesVerifiedFilter(
 }
 
 interface AuthoredTweet {
-  author?: { userName: string; name: string };
+  author?: {
+    userName: string;
+    name: string;
+    isVerified?: boolean;
+    isBlueVerified?: boolean;
+    verifiedType?: string | null;
+  };
 }
 
 interface TweetSource {
@@ -56,6 +62,8 @@ export interface AutoFollowRunnerOptions {
   now?: () => Date;
   /** Samples `n` keywords from `all`. Defaults to a random pick; injectable for tests. */
   pickKeywords?: (all: string[], n: number) => string[];
+  /** Verification tiers allowed through the filter; empty = filter off. */
+  allowedVerified: VerifiedTier[];
 }
 
 export interface FollowedCandidate {
@@ -63,6 +71,7 @@ export interface FollowedCandidate {
   name?: string;
   url: string;
   keyword?: string;
+  verified?: string[];
 }
 
 export interface CycleSummary {
@@ -88,6 +97,8 @@ export interface CycleSummary {
   followFailures: number;
   /** consecutiveZeroCycles value AFTER this cycle. */
   consecutiveZeroCycles: number;
+  /** Candidates rejected by the verified filter this cycle. */
+  skippedUnverified: number;
   /** Followed (or, in dry-run, would-follow) candidates with metadata. */
   followed: FollowedCandidate[];
   dryRun: boolean;
@@ -160,6 +171,7 @@ export class AutoFollowRunner {
       durationMs: finished.getTime() - started.getTime(),
       scanned: fill.scanned,
       queued: fill.queued,
+      skippedUnverified: fill.skippedUnverified,
       followedCountBefore,
       followedCountAfter,
       addedCount: this.options.dryRun ? 0 : followed.length,
@@ -177,9 +189,10 @@ export class AutoFollowRunner {
    * cycle is exhausted (an empty sample). Returns how many tweets were scanned and how
    * many new candidates were queued.
    */
-  private async fillQueue(): Promise<{ scanned: number; queued: number }> {
+  private async fillQueue(): Promise<{ scanned: number; queued: number; skippedUnverified: number }> {
     let scanned = 0;
     let queued = 0;
+    let skippedUnverified = 0;
     const usedThisCycle = new Set<string>();
 
     while (this.store.queueSize() < this.options.maxPerRun) {
@@ -199,8 +212,16 @@ export class AutoFollowRunner {
             scanned++;
             const userName = tweet.author?.userName;
             if (!userName) continue;
+            if (!passesVerifiedFilter(tweet.author ?? {}, this.options.allowedVerified)) {
+              skippedUnverified++;
+              continue;
+            }
             const before = this.store.queueSize();
-            this.store.enqueue(userName, { name: tweet.author?.name, keyword });
+            this.store.enqueue(userName, {
+              name: tweet.author?.name,
+              keyword,
+              verified: authorTiers(tweet.author ?? {}),
+            });
             if (this.store.queueSize() > before) queued++;
           }
         } catch (err) {
@@ -212,7 +233,7 @@ export class AutoFollowRunner {
       }
     }
 
-    return { scanned, queued };
+    return { scanned, queued, skippedUnverified };
   }
 
   /**
@@ -227,11 +248,13 @@ export class AutoFollowRunner {
       userName: string;
       name?: string;
       keyword?: string;
+      verified?: string[];
     }): FollowedCandidate => ({
       userName: c.userName,
       name: c.name,
       url: `https://x.com/${c.userName}`,
       keyword: c.keyword,
+      verified: c.verified,
     });
 
     if (this.options.dryRun) {

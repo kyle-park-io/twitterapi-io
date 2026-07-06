@@ -8,7 +8,13 @@ import * as os from "os";
 import * as path from "path";
 
 interface FakeTweet {
-  author?: { userName: string; name: string };
+  author?: {
+    userName: string;
+    name: string;
+    isVerified?: boolean;
+    isBlueVerified?: boolean;
+    verifiedType?: string | null;
+  };
 }
 
 function fakeSearch(byQuery: Record<string, FakeTweet[]>) {
@@ -64,6 +70,7 @@ test("searches one sampled batch, queues authors, and follows up to maxPerRun", 
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1", "kw2"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -96,6 +103,7 @@ test("caps follows at maxPerRun and leaves the rest queued for next cycle", asyn
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -121,6 +129,7 @@ test("samples additional batches when the queue is still short", async () => {
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"], ["kw2"], ["kw3"]]),
+    allowedVerified: [],
   });
 
   await runner.runCycle();
@@ -145,6 +154,7 @@ test("skips searching when the queue already has enough candidates", async () =>
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   await runner.runCycle();
@@ -169,6 +179,7 @@ test("does not queue users already followed", async () => {
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   await runner.runCycle();
@@ -191,6 +202,7 @@ test("respects perKeyword scan cap", async () => {
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -212,6 +224,7 @@ test("dryRun follows nobody and does not consume the queue", async () => {
     dryRun: true,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -234,6 +247,7 @@ test("no keywords sampled and empty queue follows nobody without error", async (
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -260,6 +274,7 @@ test("summary carries timing, before/after counts, and per-followed metadata", a
     delayMs: () => 0,
     now: () => new Date(t++), // advances 1ms per call
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -292,6 +307,7 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
     dryRun: true,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -329,6 +345,7 @@ test("attempted-but-followed-0 increments consecutiveZeroCycles", async () => {
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]), // empty batch → no search, just drain
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -356,6 +373,7 @@ test("a successful cycle resets the counter and sets lastSuccessAt", async () =>
     delayMs: () => 0,
     now: () => new Date(t++),
     pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -379,6 +397,7 @@ test("a cycle with nothing to attempt leaves the counter untouched", async () =>
     dryRun: false,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -402,6 +421,7 @@ test("dry-run never touches the health counter", async () => {
     dryRun: true,
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
   });
 
   const summary = await runner.runCycle();
@@ -449,4 +469,61 @@ test("passesVerifiedFilter matches when a held tier is allowed", () => {
 test("passesVerifiedFilter rejects when no held tier is allowed", () => {
   assert.equal(passesVerifiedFilter({ verifiedType: "Business" }, ["blue"]), false);
   assert.equal(passesVerifiedFilter({}, ["blue"]), false);
+});
+
+test("fillQueue skips unverified authors and counts them", async () => {
+  const store = tmpStore();
+  const search = fakeSearch({
+    kw1: [
+      { author: { userName: "verified1", name: "V1", isBlueVerified: true } },
+      { author: { userName: "plain1", name: "P1", isBlueVerified: false } },
+      { author: { userName: "biz1", name: "B1", verifiedType: "Business" } },
+    ],
+  });
+  const runner = new AutoFollowRunner(search, store, recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: ["blue", "business"],
+  });
+
+  const summary = await runner.runCycle();
+
+  // plain1 is skipped; verified1 (blue) and biz1 (business) are queued.
+  assert.equal(summary.skippedUnverified, 1);
+  assert.equal(store.queueSize(), 2);
+  const queued = store.peek(10).map((c) => c.userName).sort();
+  assert.deepEqual(queued, ["biz1", "verified1"]);
+  const v1 = store.peek(10).find((c) => c.userName === "verified1")!;
+  assert.deepEqual(v1.verified, ["blue"]);
+});
+
+test("fillQueue with empty allowedVerified keeps everyone (filter off)", async () => {
+  const store = tmpStore();
+  const search = fakeSearch({
+    kw1: [
+      { author: { userName: "plain1", name: "P1", isBlueVerified: false } },
+      { author: { userName: "plain2", name: "P2" } },
+    ],
+  });
+  const runner = new AutoFollowRunner(search, store, recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+  });
+
+  const summary = await runner.runCycle();
+  assert.equal(summary.skippedUnverified, 0);
+  assert.equal(store.queueSize(), 2);
 });
