@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { chromium, Browser, BrowserContext, Page } from "playwright";
-import { IFollower } from "../follow/IFollower";
+import { IFollower, FollowResult } from "../follow/IFollower";
 
 export interface BrowserFollowConfig {
   xUser: string;
@@ -112,7 +112,7 @@ export class BrowserFollowService implements IFollower {
     ]);
   }
 
-  async follow(username: string): Promise<void> {
+  async follow(username: string): Promise<FollowResult> {
     if (!this.context) throw new Error("Not logged in — call login() first");
     const page = await this.context.newPage();
     try {
@@ -153,8 +153,10 @@ export class BrowserFollowService implements IFollower {
         // Confirm the click registered: the button must flip to the followed state
         // ("Following @" or "Unfollow @").
         await followedButton.waitFor({ state: "visible", timeout: 10000 });
+        return "followed";
       }
-      // Otherwise the followed-state button is already showing — we already follow them.
+      // The followed-state button is already showing — we already follow them.
+      return "already-following";
     } finally {
       await page.close();
     }
