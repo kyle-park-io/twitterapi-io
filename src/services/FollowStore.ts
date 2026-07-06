@@ -11,6 +11,8 @@ interface FollowStoreData {
   followed: string[];
   queue: Array<string | Candidate>;
   lastRun: string | null;
+  lastSuccessAt?: string | null;
+  consecutiveZeroCycles?: number;
 }
 
 function normalizeCandidate(item: string | Candidate): Candidate | null {
@@ -25,6 +27,8 @@ export class FollowStore {
   private queue: Candidate[] = [];
   private queuedKeys = new Set<string>();
   private lastRun: Date | null = null;
+  private lastSuccessAt: Date | null = null;
+  private consecutiveZeroCycles = 0;
 
   constructor(private readonly filePath: string) {}
 
@@ -38,11 +42,15 @@ export class FollowStore {
         .filter((c): c is Candidate => c !== null);
       this.queuedKeys = new Set(this.queue.map((c) => c.userName.toLowerCase()));
       this.lastRun = data.lastRun ? new Date(data.lastRun) : null;
+      this.lastSuccessAt = data.lastSuccessAt ? new Date(data.lastSuccessAt) : null;
+      this.consecutiveZeroCycles = data.consecutiveZeroCycles ?? 0;
     } catch {
       this.followed = new Set();
       this.queue = [];
       this.queuedKeys = new Set();
       this.lastRun = null;
+      this.lastSuccessAt = null;
+      this.consecutiveZeroCycles = 0;
     }
   }
 
@@ -94,6 +102,22 @@ export class FollowStore {
     this.lastRun = date;
   }
 
+  getLastSuccessAt(): Date | null {
+    return this.lastSuccessAt;
+  }
+
+  setLastSuccessAt(date: Date): void {
+    this.lastSuccessAt = date;
+  }
+
+  getConsecutiveZeroCycles(): number {
+    return this.consecutiveZeroCycles;
+  }
+
+  setConsecutiveZeroCycles(n: number): void {
+    this.consecutiveZeroCycles = n;
+  }
+
   save(): void {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
@@ -101,6 +125,8 @@ export class FollowStore {
       followed: [...this.followed],
       queue: [...this.queue],
       lastRun: this.lastRun ? this.lastRun.toISOString() : null,
+      lastSuccessAt: this.lastSuccessAt ? this.lastSuccessAt.toISOString() : null,
+      consecutiveZeroCycles: this.consecutiveZeroCycles,
     };
     fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
   }

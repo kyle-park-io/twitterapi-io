@@ -177,3 +177,30 @@ test("followedCount reflects adds", () => {
   store.add("bob");
   assert.equal(store.followedCount(), 2);
 });
+
+test("health fields default when absent from an old file", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ followed: [], queue: [], lastRun: null })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.getLastSuccessAt(), null);
+  assert.equal(store.getConsecutiveZeroCycles(), 0);
+});
+
+test("health fields round-trip through save/load", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  const when = new Date("2026-07-06T12:00:00.000Z");
+  store.setLastSuccessAt(when);
+  store.setConsecutiveZeroCycles(3);
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.equal(reloaded.getConsecutiveZeroCycles(), 3);
+  assert.equal(reloaded.getLastSuccessAt()?.toISOString(), when.toISOString());
+});
