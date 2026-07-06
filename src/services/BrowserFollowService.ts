@@ -126,14 +126,35 @@ export class BrowserFollowService implements IFollower {
       const followButton = page.getByRole("button", {
         name: new RegExp(`^Follow @${username}$`, "i"),
       });
+      // Once following, X labels the header action "Following @<user>" OR
+      // "Unfollow @<user>" depending on the UI variant/hover state — accept either
+      // as proof the follow registered.
+      const followedButton = page.getByRole("button", {
+        name: new RegExp(`^(Following|Unfollow) @${username}$`, "i"),
+      });
 
-      if (await followButton.isVisible({ timeout: 8000 }).catch(() => false)) {
+      // The profile is a SPA, so wait for the header action to render rather than
+      // snapshotting visibility right after domcontentloaded — isVisible() does NOT
+      // wait for the element, so an unrendered Follow button read as "not present"
+      // and the follow was silently skipped while still being reported as done.
+      // Wait for EITHER the Follow button (not yet following) or the followed-state
+      // button (already following) to appear.
+      await Promise.race([
+        followButton.waitFor({ state: "visible", timeout: 15000 }),
+        followedButton.waitFor({ state: "visible", timeout: 15000 }),
+      ]).catch(() => {
+        throw new Error(
+          `neither Follow nor Following/Unfollow button rendered for @${username} within 15s`
+        );
+      });
+
+      if (await followButton.isVisible().catch(() => false)) {
         await followButton.click();
-        await page
-          .getByRole("button", { name: new RegExp(`^Following @${username}$`, "i") })
-          .waitFor({ timeout: 8000 });
+        // Confirm the click registered: the button must flip to the followed state
+        // ("Following @" or "Unfollow @").
+        await followedButton.waitFor({ state: "visible", timeout: 10000 });
       }
-      // If the Follow button is not visible, we are already following — no-op.
+      // Otherwise the followed-state button is already showing — we already follow them.
     } finally {
       await page.close();
     }
