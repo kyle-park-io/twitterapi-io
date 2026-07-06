@@ -46,6 +46,9 @@ test("malformed file loads as empty state without throwing", () => {
   store.load();
   assert.equal(store.has("anyone"), false);
   assert.equal(store.getLastRun(), null);
+  // The catch path must also reset the health fields, not leave stale values.
+  assert.equal(store.getLastSuccessAt(), null);
+  assert.equal(store.getConsecutiveZeroCycles(), 0);
 });
 
 test("save creates parent directories", () => {
