@@ -53,23 +53,23 @@ to `maxPerRun` of them through a real browser session (Playwright). Candidates
 beyond the per-cycle cap stay queued for the next cycle, so search results are
 never wasted and the search API is hit only enough to keep the queue full.
 
-One-time setup:
+One-time setup — import your X session:
 
 ```bash
 npx playwright install chromium
-pnpm save-session          # opens a browser; log in to X by hand, then press Enter
+# Copy auth_token and ct0 from a logged-in Chrome (F12 -> Application ->
+# Cookies -> https://x.com), put them in .env as X_AUTH_TOKEN / X_CT0, then:
+pnpm import-session
 ```
 
-`save-session` opens a real browser window at the X login page. Log in yourself
-(username, password, 2FA), and once you see your home timeline, return to the
-terminal and press Enter — the session is saved to `.auth/x-session.json` and
-reused on every later run. This is the **recommended** path: X aggressively
-flags automated logins, so logging in by hand once and reusing the session is
-far more reliable (and won't get your account rate-limited).
+X blocks automated logins ("This browser or app may not be secure"), so the
+tool does **not** log in through Playwright. Instead, copy your existing X
+session from a browser you're already logged in to. `import-session` writes the
+session to `.auth/x-session.json` and verifies it by loading it headless and
+checking you're signed in. Every later run reuses that session.
 
-If `.auth/x-session.json` is missing or stale, the tool falls back to an
-automated login using the `X_*` env vars — but X may block or challenge it, so
-prefer `save-session`.
+> The older `pnpm save-session` (hand-login in a Playwright window) is kept but
+> **not recommended** — X flags the automated browser and refuses the login.
 
 Run:
 
@@ -98,7 +98,7 @@ Follow history and the pending-candidate queue are stored under `.auth/`
 (git-ignored) alongside the browser session, so restarts resume the same queue
 without re-following or re-searching.
 
-Requires the `X_*` env vars (see below) for the browser login.
+Requires `X_AUTH_TOKEN` / `X_CT0` (see below) for the imported browser session.
 
 ## Interactive CLI
 
@@ -134,3 +134,5 @@ output/        — JSON output files (git-ignored)
 | `X_PASSWORD` | Write only | Twitter password |
 | `X_PROXY` | Write only | HTTP/SOCKS proxy URL |
 | `X_TOTP` | Write only (optional) | 2FA secret |
+| `X_AUTH_TOKEN` | Auto-follow | X `auth_token` cookie (from a logged-in Chrome) |
+| `X_CT0` | Auto-follow | X `ct0` cookie (from a logged-in Chrome) |
