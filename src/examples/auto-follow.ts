@@ -4,9 +4,23 @@ import { TweetService } from "../services/TweetService";
 import { FollowStore } from "../services/FollowStore";
 import { BrowserFollowService } from "../services/BrowserFollowService";
 import { AutoFollowRunner } from "../services/AutoFollowRunner";
+import * as fs from "fs";
+import * as path from "path";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const LOG_PATH = path.join(process.cwd(), "output", "auto-follow-log.jsonl");
+
+function appendLog(record: unknown): void {
+  try {
+    fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+    fs.appendFileSync(LOG_PATH, JSON.stringify(record) + "\n", "utf8");
+  } catch (err) {
+    // A lost log line must never stop the follow loop.
+    console.error("Failed to write log:", err instanceof Error ? err.message : String(err));
+  }
 }
 
 async function main() {
@@ -64,6 +78,7 @@ async function main() {
         `Cycle done — scanned ${summary.scanned}, ` +
           `queued ${summary.queued}, followed ${summary.followed.length}`
       );
+      appendLog({ type: "cycle", ...summary });
     } catch (err) {
       console.error("Cycle error:", err instanceof Error ? err.message : String(err));
     }

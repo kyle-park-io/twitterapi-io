@@ -98,6 +98,23 @@ Follow history and the pending-candidate queue are stored under `.auth/`
 (git-ignored) alongside the browser session, so restarts resume the same queue
 without re-following or re-searching.
 
+Each cycle appends a JSON line to `output/auto-follow-log.jsonl` (git-ignored)
+recording start/end time, duration, tweets scanned, candidates queued, the
+followed-count before and after, how many were newly followed, and for each
+followed account its `userName`, display `name`, profile `url`, and the
+`keyword` that surfaced them. Dry-run cycles are logged too (`addedCount` 0).
+
+To cross-check that follows are actually landing, run occasionally:
+
+```bash
+pnpm follow-audit
+```
+
+It looks up the account's real following count via the read API and appends an
+`{"type":"audit",...}` line with both that number and the tool's local tally.
+The two won't match exactly (you also follow/unfollow by hand); an approximate
+match means it's working. Requires `X_USER` and `TWITTERAPI_IO_KEY`.
+
 Requires `X_AUTH_TOKEN` / `X_CT0` (see below) for the imported browser session.
 
 ## Interactive CLI
