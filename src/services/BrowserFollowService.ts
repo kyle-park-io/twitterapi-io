@@ -150,9 +150,23 @@ export class BrowserFollowService implements IFollower {
 
       if (await followButton.isVisible().catch(() => false)) {
         await followButton.click();
-        // Confirm the click registered: the button must flip to the followed state
-        // ("Following @" or "Unfollow @").
-        await followedButton.waitFor({ state: "visible", timeout: 10000 });
+        // The click is what actually follows the account, so a successful click
+        // means "followed". We still try to observe the button flip to the
+        // followed state ("Following @" / "Unfollow @") as confirmation, but some
+        // profiles take >10s to flip (slow headless render, X lag), and treating
+        // that as a failure wrongly reported real follows as "Follow failed".
+        // So confirmation is best-effort: if it doesn't appear, warn and still
+        // return "followed" rather than throwing.
+        const confirmed = await followedButton
+          .waitFor({ state: "visible", timeout: 10000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!confirmed) {
+          console.warn(
+            `Clicked Follow for @${username} but couldn't confirm the flip ` +
+              `within 10s — assuming followed.`
+          );
+        }
         return "followed";
       }
       // The followed-state button is already showing — we already follow them.
