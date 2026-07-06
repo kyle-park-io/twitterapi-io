@@ -71,6 +71,10 @@ test("searches one sampled batch, queues authors, and follows up to maxPerRun", 
   assert.deepEqual(search.queries, ["kw1", "kw2"]); // one batch of 2, no since: suffix
   assert.deepEqual(follower.followed.sort(), ["alice", "bob", "carol"]);
   assert.equal(summary.followed.length, 3);
+  assert.deepEqual(
+    summary.followed.map((f) => f.userName).sort(),
+    ["alice", "bob", "carol"]
+  );
 });
 
 test("caps follows at maxPerRun and leaves the rest queued for next cycle", async () => {
@@ -213,7 +217,10 @@ test("dryRun follows nobody and does not consume the queue", async () => {
   const summary = await runner.runCycle();
 
   assert.deepEqual(follower.followed, []); // dry-run follows nobody
-  assert.deepEqual(summary.followed, ["alice"]); // but reports who it would follow
+  assert.deepEqual(
+    summary.followed.map((f) => f.userName),
+    ["alice"]
+  ); // but reports who it would follow
   assert.equal(store.queueSize(), 1); // candidate stays queued for a real run
 });
 
@@ -232,4 +239,70 @@ test("no keywords sampled and empty queue follows nobody without error", async (
   const summary = await runner.runCycle();
 
   assert.deepEqual(summary.followed, []);
+});
+
+test("summary carries timing, before/after counts, and per-followed metadata", async () => {
+  const search = fakeSearch({
+    kw1: [
+      { author: { userName: "alice", name: "Alice A" } },
+      { author: { userName: "bob", name: "Bob B" } },
+    ],
+  });
+  const follower = recordingFollower();
+  let t = 1000;
+  const runner = new AutoFollowRunner(search, tmpStore(), follower, {
+    keywords: ["kw1", "kw2"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    now: () => new Date(t++), // advances 1ms per call
+    pickKeywords: scriptedPicker([["kw1"]]),
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.dryRun, false);
+  assert.equal(summary.followedCountBefore, 0);
+  assert.equal(summary.followedCountAfter, 2);
+  assert.equal(summary.addedCount, 2);
+  assert.ok(summary.durationMs >= 0);
+  assert.equal(typeof summary.startedAt, "string");
+  assert.equal(typeof summary.finishedAt, "string");
+  const alice = summary.followed.find((f) => f.userName === "alice")!;
+  assert.equal(alice.name, "Alice A");
+  assert.equal(alice.url, "https://x.com/alice");
+  assert.equal(alice.keyword, "kw1");
+});
+
+test("dry-run reports would-follow candidates with addedCount 0 and no queue consumption", async () => {
+  const store = tmpStore();
+  const search = fakeSearch({
+    kw1: [{ author: { userName: "alice", name: "Alice" } }],
+  });
+  const follower = recordingFollower();
+  const runner = new AutoFollowRunner(search, store, follower, {
+    keywords: ["kw1", "kw2"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.dryRun, true);
+  assert.equal(summary.addedCount, 0);
+  assert.equal(summary.followedCountBefore, 0);
+  assert.equal(summary.followedCountAfter, 0);
+  assert.equal(follower.followed.length, 0); // nobody actually followed
+  assert.equal(store.queueSize(), 1); // candidate still queued (peek, not dequeue)
+  assert.equal(summary.followed[0].userName, "alice");
+  assert.equal(summary.followed[0].url, "https://x.com/alice");
+  assert.equal(summary.followed[0].keyword, "kw1");
 });

@@ -27,13 +27,33 @@ export interface AutoFollowRunnerOptions {
   pickKeywords?: (all: string[], n: number) => string[];
 }
 
+export interface FollowedCandidate {
+  userName: string;
+  name?: string;
+  url: string;
+  keyword?: string;
+}
+
 export interface CycleSummary {
+  /** ISO timestamp when the cycle started. */
+  startedAt: string;
+  /** ISO timestamp when the cycle finished. */
+  finishedAt: string;
+  /** Wall-clock cycle duration in ms. */
+  durationMs: number;
   /** Tweets scanned across all searches this cycle. */
   scanned: number;
   /** Candidates queued this cycle (newly enqueued). */
   queued: number;
-  /** Usernames followed (or, in dry-run, that would be followed). */
-  followed: string[];
+  /** followed-set size before draining. */
+  followedCountBefore: number;
+  /** followed-set size after draining. */
+  followedCountAfter: number;
+  /** Newly followed this cycle (real follows only; 0 in dry-run). */
+  addedCount: number;
+  /** Followed (or, in dry-run, would-follow) candidates with metadata. */
+  followed: FollowedCandidate[];
+  dryRun: boolean;
 }
 
 function randomDelayMs(): number {
@@ -71,12 +91,26 @@ export class AutoFollowRunner {
   }
 
   async runCycle(): Promise<CycleSummary> {
-    const scanned = await this.fillQueue();
-    const queued = scanned.queued;
+    const started = this.now();
+    const followedCountBefore = this.store.followedCount();
+    const fill = await this.fillQueue();
     const followed = await this.drainQueue();
-    this.store.setLastRun(this.now());
+    const followedCountAfter = this.store.followedCount();
+    const finished = this.now();
+    this.store.setLastRun(finished);
     this.store.save();
-    return { scanned: scanned.scanned, queued, followed };
+    return {
+      startedAt: started.toISOString(),
+      finishedAt: finished.toISOString(),
+      durationMs: finished.getTime() - started.getTime(),
+      scanned: fill.scanned,
+      queued: fill.queued,
+      followedCountBefore,
+      followedCountAfter,
+      addedCount: this.options.dryRun ? 0 : followed.length,
+      followed,
+      dryRun: this.options.dryRun,
+    };
   }
 
   /**
@@ -108,7 +142,7 @@ export class AutoFollowRunner {
             const userName = tweet.author?.userName;
             if (!userName) continue;
             const before = this.store.queueSize();
-            this.store.enqueue(userName); // skips already-followed / already-queued
+            this.store.enqueue(userName, { name: tweet.author?.name, keyword });
             if (this.store.queueSize() > before) queued++;
           }
         } catch (err) {
@@ -130,26 +164,37 @@ export class AutoFollowRunner {
    * followed-set. A follow failure is logged and the candidate is dropped (not re-queued),
    * so a persistently unfollowable user cannot wedge the queue.
    */
-  private async drainQueue(): Promise<string[]> {
+  private async drainQueue(): Promise<FollowedCandidate[]> {
+    const toCandidate = (c: {
+      userName: string;
+      name?: string;
+      keyword?: string;
+    }): FollowedCandidate => ({
+      userName: c.userName,
+      name: c.name,
+      url: `https://x.com/${c.userName}`,
+      keyword: c.keyword,
+    });
+
     if (this.options.dryRun) {
       const targets = this.store.peek(this.options.maxPerRun);
-      for (const userName of targets) console.log(`[dry-run] would follow @${userName}`);
-      return targets;
+      for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
+      return targets.map(toCandidate);
     }
 
     const targets = this.store.dequeue(this.options.maxPerRun);
-    const followed: string[] = [];
+    const followed: FollowedCandidate[] = [];
     for (let i = 0; i < targets.length; i++) {
-      const userName = targets[i];
+      const c = targets[i];
       try {
         if (i > 0) await sleep(this.delayMs());
-        await this.follower.follow(userName);
-        this.store.add(userName);
-        followed.push(userName);
-        console.log(`Followed @${userName}`);
+        await this.follower.follow(c.userName);
+        this.store.add(c.userName);
+        followed.push(toCandidate(c));
+        console.log(`Followed @${c.userName}`);
       } catch (err) {
         console.error(
-          `Follow failed for @${userName}:`,
+          `Follow failed for @${c.userName}:`,
           err instanceof Error ? err.message : String(err)
         );
       }
