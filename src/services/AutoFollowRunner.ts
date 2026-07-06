@@ -71,7 +71,7 @@ export interface FollowedCandidate {
   name?: string;
   url: string;
   keyword?: string;
-  verified?: string[];
+  verified?: VerifiedTier[];
 }
 
 export interface CycleSummary {
@@ -254,7 +254,9 @@ export class AutoFollowRunner {
       name: c.name,
       url: `https://x.com/${c.userName}`,
       keyword: c.keyword,
-      verified: c.verified,
+      // The queue's Candidate keeps verified loosely typed as string[] to stay
+      // decoupled from this module; the values are always authorTiers() output.
+      verified: c.verified as VerifiedTier[] | undefined,
     });
 
     if (this.options.dryRun) {

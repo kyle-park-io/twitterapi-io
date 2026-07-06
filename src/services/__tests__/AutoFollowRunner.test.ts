@@ -501,6 +501,9 @@ test("fillQueue skips unverified authors and counts them", async () => {
   assert.deepEqual(queued, ["biz1", "verified1"]);
   const v1 = store.peek(10).find((c) => c.userName === "verified1")!;
   assert.deepEqual(v1.verified, ["blue"]);
+  // verified tiers must reach the followed summary (the JSONL log's source).
+  const summaryV1 = summary.followed.find((f) => f.userName === "verified1")!;
+  assert.deepEqual(summaryV1.verified, ["blue"]);
 });
 
 test("fillQueue with empty allowedVerified keeps everyone (filter off)", async () => {
