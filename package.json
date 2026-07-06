@@ -14,8 +14,9 @@
     "example:write": "ts-node src/examples/write-actions.ts",
     "example:trends": "ts-node src/examples/trends.ts",
     "example:mantle-research-challenge": "ts-node src/examples/mantle-research-challenge.ts",
-    "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\"",
-    "example:auto-follow": "ts-node src/examples/auto-follow.ts"
+    "example:mantle-kr-q2-audit": "ts-node src/examples/mantle-kr-q2-audit.ts",
+    "example:auto-follow": "ts-node src/examples/auto-follow.ts",
+    "test": "node --require ts-node/register/transpile-only --test \"src/**/*.test.ts\""
   },
   "repository": {
     "type": "git",
