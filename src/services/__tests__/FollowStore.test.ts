@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { FollowStore, Candidate } from "../FollowStore";
+import { FollowStore } from "../FollowStore";
 
 function tmpFile(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fs-")), "state.json");
