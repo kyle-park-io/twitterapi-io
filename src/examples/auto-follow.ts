@@ -37,6 +37,10 @@ async function main() {
     xPassword: config.xPassword,
     xTotp: config.xTotp,
     storageStatePath: config.storageStatePath,
+    // Run headless by default so the loop works unattended (e.g. under systemd,
+    // where there is no X server / DISPLAY). Set HEADLESS=false to watch the
+    // browser during local debugging. The saved cookie session works headless.
+    headless: process.env["HEADLESS"] !== "false",
   });
 
   const runner = new AutoFollowRunner(tweets, store, follower, {
