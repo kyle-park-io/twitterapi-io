@@ -208,6 +208,30 @@ test("health fields round-trip through save/load", () => {
   assert.equal(reloaded.getLastSuccessAt()?.toISOString(), when.toISOString());
 });
 
+test("lastFollowingSyncAt defaults to null when absent from an old file", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ followed: [], queue: [], lastRun: null })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.getLastFollowingSyncAt(), null);
+});
+
+test("lastFollowingSyncAt round-trips through save/load", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  const when = new Date("2026-07-16T00:00:00.000Z");
+  store.setLastFollowingSyncAt(when);
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.equal(reloaded.getLastFollowingSyncAt()?.toISOString(), when.toISOString());
+});
+
 test("enqueue stores verified tiers and round-trips", () => {
   const file = tmpFile();
   const store = new FollowStore(file);

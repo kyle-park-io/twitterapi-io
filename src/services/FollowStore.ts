@@ -14,6 +14,7 @@ interface FollowStoreData {
   lastRun: string | null;
   lastSuccessAt?: string | null;
   consecutiveZeroCycles?: number;
+  lastFollowingSyncAt?: string | null;
 }
 
 function normalizeCandidate(item: string | Candidate): Candidate | null {
@@ -30,6 +31,7 @@ export class FollowStore {
   private lastRun: Date | null = null;
   private lastSuccessAt: Date | null = null;
   private consecutiveZeroCycles = 0;
+  private lastFollowingSyncAt: Date | null = null;
 
   constructor(private readonly filePath: string) {}
 
@@ -45,6 +47,9 @@ export class FollowStore {
       this.lastRun = data.lastRun ? new Date(data.lastRun) : null;
       this.lastSuccessAt = data.lastSuccessAt ? new Date(data.lastSuccessAt) : null;
       this.consecutiveZeroCycles = data.consecutiveZeroCycles ?? 0;
+      this.lastFollowingSyncAt = data.lastFollowingSyncAt
+        ? new Date(data.lastFollowingSyncAt)
+        : null;
     } catch {
       this.followed = new Set();
       this.queue = [];
@@ -52,6 +57,7 @@ export class FollowStore {
       this.lastRun = null;
       this.lastSuccessAt = null;
       this.consecutiveZeroCycles = 0;
+      this.lastFollowingSyncAt = null;
     }
   }
 
@@ -122,6 +128,14 @@ export class FollowStore {
     this.consecutiveZeroCycles = n;
   }
 
+  getLastFollowingSyncAt(): Date | null {
+    return this.lastFollowingSyncAt;
+  }
+
+  setLastFollowingSyncAt(date: Date): void {
+    this.lastFollowingSyncAt = date;
+  }
+
   save(): void {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
@@ -131,6 +145,9 @@ export class FollowStore {
       lastRun: this.lastRun ? this.lastRun.toISOString() : null,
       lastSuccessAt: this.lastSuccessAt ? this.lastSuccessAt.toISOString() : null,
       consecutiveZeroCycles: this.consecutiveZeroCycles,
+      lastFollowingSyncAt: this.lastFollowingSyncAt
+        ? this.lastFollowingSyncAt.toISOString()
+        : null,
     };
     fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
   }

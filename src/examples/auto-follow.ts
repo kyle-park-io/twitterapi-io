@@ -30,6 +30,14 @@ function appendLog(record: unknown): void {
   }
 }
 
+// The following-list sync is a read-API call that paginates the account's whole
+// following list (~1 request per 200 follows), so it is throttled to run at most
+// once per this window across restarts. It only exists to catch follows/unfollows
+// made by hand outside the tool — the tool's own follows are already in the
+// persisted followed-set, and a missed manual follow is harmless because the
+// browser detects the existing follow and reports "already-following".
+const FOLLOWING_SYNC_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
 async function syncFollowing(
   users: UserService,
   store: FollowStore,
@@ -40,6 +48,7 @@ async function syncFollowing(
     store.add(f.userName);
     n++;
   }
+  store.setLastFollowingSyncAt(new Date());
   store.save();
   return n;
 }
@@ -96,14 +105,26 @@ async function main() {
     console.log("Logged in.");
 
     // Best-effort: merge the account's real following list into the followed-set
-    // so already-followed accounts stop being queued. If it fails, warn and keep
-    // going — a redundant follow attempt later is a harmless no-op.
-    try {
-      const n = await syncFollowing(users, store, config.xUser);
-      console.log(`Synced ${n} existing follows from X.`);
-    } catch (err) {
-      console.error(
-        `Following sync failed (continuing anyway): ${err instanceof Error ? err.message : String(err)}`
+    // so already-followed accounts stop being queued. Throttled to once every
+    // FOLLOWING_SYNC_INTERVAL_MS so frequent restarts don't each re-page the whole
+    // list. If it fails, warn and keep going — a redundant follow attempt later is
+    // a harmless no-op.
+    const lastSync = store.getLastFollowingSyncAt();
+    const sinceSyncMs = lastSync ? Date.now() - lastSync.getTime() : Infinity;
+    if (sinceSyncMs >= FOLLOWING_SYNC_INTERVAL_MS) {
+      try {
+        const n = await syncFollowing(users, store, config.xUser);
+        console.log(`Synced ${n} existing follows from X.`);
+      } catch (err) {
+        console.error(
+          `Following sync failed (continuing anyway): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    } else {
+      const hrs = Math.round(sinceSyncMs / 3_600_000);
+      const everyH = FOLLOWING_SYNC_INTERVAL_MS / 3_600_000;
+      console.log(
+        `Following sync skipped — last synced ~${hrs}h ago (throttled to every ${everyH}h).`
       );
     }
   }

@@ -16,9 +16,16 @@ Every cycle the loop:
 3. Follows up to `maxPerRun` queued candidates through a real Playwright browser
    session, then sleeps `intervalMinutes` and repeats.
 
-State (followed set, pending queue, health counters) lives in
-`.auth/auto-follow-state.json`; a per-cycle report is appended to
+State (followed set, pending queue, health counters, last following-sync time)
+lives in `.auth/auto-follow-state.json`; a per-cycle report is appended to
 `output/auto-follow-log.jsonl`. Both are git-ignored.
+
+On startup the loop merges the account's real following list into the followed
+set (a read-API call that pages the whole list) so already-followed accounts are
+not re-queued. This sync is **throttled to once every 2 days** across restarts,
+so frequent restarts (config changes, reboots) don't each re-page the list. A
+follow made by hand in between is caught on the next sync and is harmless until
+then — the browser sees the existing follow and reports "already-following".
 
 ## Configuration — `config/auto-follow.json`
 
