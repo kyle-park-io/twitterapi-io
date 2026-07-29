@@ -15,6 +15,10 @@ interface FollowStoreData {
   lastSuccessAt?: string | null;
   consecutiveZeroCycles?: number;
   lastFollowingSyncAt?: string | null;
+  lastActualFollowingCount?: number | null;
+  capStallCycles?: number;
+  capDetectedAt?: string | null;
+  capActualCount?: number | null;
 }
 
 function normalizeCandidate(item: string | Candidate): Candidate | null {
@@ -32,6 +36,10 @@ export class FollowStore {
   private lastSuccessAt: Date | null = null;
   private consecutiveZeroCycles = 0;
   private lastFollowingSyncAt: Date | null = null;
+  private lastActualFollowingCount: number | null = null;
+  private capStallCycles = 0;
+  private capDetectedAt: Date | null = null;
+  private capActualCount: number | null = null;
 
   constructor(private readonly filePath: string) {}
 
@@ -50,6 +58,10 @@ export class FollowStore {
       this.lastFollowingSyncAt = data.lastFollowingSyncAt
         ? new Date(data.lastFollowingSyncAt)
         : null;
+      this.lastActualFollowingCount = data.lastActualFollowingCount ?? null;
+      this.capStallCycles = data.capStallCycles ?? 0;
+      this.capDetectedAt = data.capDetectedAt ? new Date(data.capDetectedAt) : null;
+      this.capActualCount = data.capActualCount ?? null;
     } catch {
       this.followed = new Set();
       this.queue = [];
@@ -58,6 +70,10 @@ export class FollowStore {
       this.lastSuccessAt = null;
       this.consecutiveZeroCycles = 0;
       this.lastFollowingSyncAt = null;
+      this.lastActualFollowingCount = null;
+      this.capStallCycles = 0;
+      this.capDetectedAt = null;
+      this.capActualCount = null;
     }
   }
 
@@ -67,6 +83,11 @@ export class FollowStore {
 
   add(username: string): void {
     this.followed.add(username.toLowerCase());
+  }
+
+  /** Remove a user from the followed-set (e.g. a follow X silently dropped). */
+  remove(username: string): void {
+    this.followed.delete(username.toLowerCase());
   }
 
   followedCount(): number {
@@ -136,6 +157,38 @@ export class FollowStore {
     this.lastFollowingSyncAt = date;
   }
 
+  getLastActualFollowingCount(): number | null {
+    return this.lastActualFollowingCount;
+  }
+
+  setLastActualFollowingCount(n: number | null): void {
+    this.lastActualFollowingCount = n;
+  }
+
+  getCapStallCycles(): number {
+    return this.capStallCycles;
+  }
+
+  setCapStallCycles(n: number): void {
+    this.capStallCycles = n;
+  }
+
+  getCapDetectedAt(): Date | null {
+    return this.capDetectedAt;
+  }
+
+  setCapDetectedAt(date: Date | null): void {
+    this.capDetectedAt = date;
+  }
+
+  getCapActualCount(): number | null {
+    return this.capActualCount;
+  }
+
+  setCapActualCount(n: number | null): void {
+    this.capActualCount = n;
+  }
+
   save(): void {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
@@ -148,6 +201,10 @@ export class FollowStore {
       lastFollowingSyncAt: this.lastFollowingSyncAt
         ? this.lastFollowingSyncAt.toISOString()
         : null,
+      lastActualFollowingCount: this.lastActualFollowingCount,
+      capStallCycles: this.capStallCycles,
+      capDetectedAt: this.capDetectedAt ? this.capDetectedAt.toISOString() : null,
+      capActualCount: this.capActualCount,
     };
     fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
   }

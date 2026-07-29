@@ -77,8 +77,18 @@ function main() {
 
   const recent = recentAdded(6);
   const spark = recent.length ? recent.map((n) => `+${n}`).join(" ") : "(no log yet)";
+  const capAt = store.getCapDetectedAt();
 
-  console.log(`Auto-follow status: ${unhealthy ? "⚠️ UNHEALTHY" : "✅ HEALTHY"}`);
+  console.log(
+    `Auto-follow status: ${capAt ? "⏸ FOLLOW-CAPPED" : unhealthy ? "⚠️ UNHEALTHY" : "✅ HEALTHY"}`
+  );
+  if (capAt) {
+    console.log(
+      `  ⚠️ X follow cap: actual following pinned at ~${store.getCapActualCount()} ` +
+        `since ${kst(capAt)} — real cycles paused, probing until it rises.\n` +
+        `     The cap is ratio-based (help.x.com/en/using-x/x-follow-limit); it lifts as followers grow.`
+    );
+  }
   console.log(`  Last run:        ${kst(store.getLastRun())} (${ago(store.getLastRun())})`);
   console.log(`  Last success:    ${kst(store.getLastSuccessAt())} (${ago(store.getLastSuccessAt())})`);
   console.log(`  Consecutive zero-follow cycles: ${zero} (threshold ${threshold})`);

@@ -244,3 +244,83 @@ test("enqueue stores verified tiers and round-trips", () => {
     { userName: "carol", name: "Carol", keyword: "AI", verified: ["blue"] },
   ]);
 });
+
+test("cap fields default to empty when absent from an old file", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ followed: [], queue: [], lastRun: null })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.getLastActualFollowingCount(), null);
+  assert.equal(store.getCapStallCycles(), 0);
+  assert.equal(store.getCapDetectedAt(), null);
+  assert.equal(store.getCapActualCount(), null);
+});
+
+test("cap fields round-trip through save/load", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  const when = new Date("2026-07-29T00:00:00.000Z");
+  store.setLastActualFollowingCount(7500);
+  store.setCapStallCycles(2);
+  store.setCapDetectedAt(when);
+  store.setCapActualCount(7500);
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.equal(reloaded.getLastActualFollowingCount(), 7500);
+  assert.equal(reloaded.getCapStallCycles(), 2);
+  assert.equal(reloaded.getCapDetectedAt()?.toISOString(), when.toISOString());
+  assert.equal(reloaded.getCapActualCount(), 7500);
+});
+
+test("clearing cap fields with null round-trips", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  store.setCapDetectedAt(new Date());
+  store.setCapActualCount(7500);
+  store.setCapDetectedAt(null);
+  store.setCapActualCount(null);
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.equal(reloaded.getCapDetectedAt(), null);
+  assert.equal(reloaded.getCapActualCount(), null);
+});
+
+test("malformed file resets cap fields", () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, "{ not valid json", "utf8");
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.getLastActualFollowingCount(), null);
+  assert.equal(store.getCapStallCycles(), 0);
+  assert.equal(store.getCapDetectedAt(), null);
+  assert.equal(store.getCapActualCount(), null);
+});
+
+test("remove takes a user out of the followed-set case-insensitively", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.add("Alice");
+  store.remove("ALICE");
+  assert.equal(store.has("alice"), false);
+});
+
+test("a removed user can be re-queued", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.add("bob");
+  store.enqueue("bob"); // no-op: already followed
+  assert.equal(store.queueSize(), 0);
+  store.remove("bob");
+  store.enqueue("bob", { keyword: "AI" });
+  assert.equal(store.queueSize(), 1);
+  assert.equal(store.isQueued("bob"), true);
+});

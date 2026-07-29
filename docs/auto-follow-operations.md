@@ -146,6 +146,7 @@ keep running across reboots. Without this the loop can silently pause for hours.
 | `followed` dips but `queued` is still healthy (20+) | Not depletion — just a few `Follow failed`/slow-confirm this cycle. | None; normal variance. |
 | Many `Follow failed: neither Follow nor Following/Unfollow button rendered` | Profile didn't load / account suspended or restricted. | Normal at 1–2/cycle; only a concern if most of a cycle fails. |
 | `Follow failed` but the account is actually followed on X | Old bug (fixed): confirmation timed out though the click landed. | Already handled — now logged as `assuming followed` and counted. |
+| `follow-status` shows `⏸ FOLLOW-CAPPED` / journal shows `FOLLOW CAP REACHED` | X's ratio-based follow cap: past ~5,000 total follows, X silently drops follows beyond a per-account limit (~1.1× follower count) even though the Follow button flips (help.x.com/en/using-x/x-follow-limit). Detected when 2 consecutive cycles land under half their recorded follows (checked against the actual following count, 1 read-API call/cycle). | Nothing to fix in the tool — the loop pauses real cycles and probes 2 candidates/interval, auto-resuming (`cap-cleared` in the JSONL log) once the actual count rises. The cap only lifts as the account gains followers. Happened 2026-07-28 at ~7,500: 562 ghosted follows were reverted and re-queued. |
 
 ## How verification is checked
 
