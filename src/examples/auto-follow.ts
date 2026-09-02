@@ -219,6 +219,7 @@ async function main() {
     maxPerRun: config.maxPerRun,
     dryRun: config.dryRun,
     allowedVerified: config.allowedVerified,
+    maxFollowers: config.maxFollowers,
   });
 
   let stopping = false;

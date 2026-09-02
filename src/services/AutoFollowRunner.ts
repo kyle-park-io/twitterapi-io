@@ -1,5 +1,6 @@
 import { IFollower } from "../follow/IFollower";
 import { FollowStore } from "./FollowStore";
+import { scoreAccount, fromSearchAuthor } from "../follow/scoring";
 
 export type VerifiedTier = "blue" | "legacy" | "business" | "government";
 
@@ -39,6 +40,12 @@ interface AuthoredTweet {
     isVerified?: boolean;
     isBlueVerified?: boolean;
     verifiedType?: string | null;
+    description?: string | null;
+    followers?: number;
+    following?: number;
+    statusesCount?: number;
+    profilePicture?: string | null;
+    coverPicture?: string | null;
   };
 }
 
@@ -64,6 +71,8 @@ export interface AutoFollowRunnerOptions {
   pickKeywords?: (all: string[], n: number) => string[];
   /** Verification tiers allowed through the filter; empty = filter off. */
   allowedVerified: VerifiedTier[];
+  /** Follower-count ceiling; candidates above this are rejected before enqueueing. */
+  maxFollowers: number;
 }
 
 export interface FollowedCandidate {
@@ -101,6 +110,10 @@ export interface CycleSummary {
   consecutiveZeroCycles: number;
   /** Candidates rejected by the verified filter this cycle. */
   skippedUnverified: number;
+  /** Candidates rejected by the cleanup scoring function (score > 0) this cycle. */
+  skippedScored: number;
+  /** Candidates rejected for exceeding the follower ceiling this cycle. */
+  skippedTooBig: number;
   /** Followed (or, in dry-run, would-follow) candidates with metadata. */
   followed: FollowedCandidate[];
   dryRun: boolean;
@@ -176,6 +189,8 @@ export class AutoFollowRunner {
       scanned: fill.scanned,
       queued: fill.queued,
       skippedUnverified: fill.skippedUnverified,
+      skippedScored: fill.skippedScored,
+      skippedTooBig: fill.skippedTooBig,
       followedCountBefore,
       followedCountAfter,
       addedCount: this.options.dryRun ? 0 : followed.length,
@@ -194,10 +209,18 @@ export class AutoFollowRunner {
    * cycle is exhausted (an empty sample). Returns how many tweets were scanned and how
    * many new candidates were queued.
    */
-  private async fillQueue(): Promise<{ scanned: number; queued: number; skippedUnverified: number }> {
+  private async fillQueue(): Promise<{
+    scanned: number;
+    queued: number;
+    skippedUnverified: number;
+    skippedScored: number;
+    skippedTooBig: number;
+  }> {
     let scanned = 0;
     let queued = 0;
     let skippedUnverified = 0;
+    let skippedScored = 0;
+    let skippedTooBig = 0;
     const usedThisCycle = new Set<string>();
 
     while (this.store.queueSize() < this.options.maxPerRun) {
@@ -221,6 +244,16 @@ export class AutoFollowRunner {
               skippedUnverified++;
               continue;
             }
+            // userName was read from tweet.author above, so it must be defined here.
+            const author = tweet.author!;
+            if (scoreAccount(fromSearchAuthor(author)).score > 0) {
+              skippedScored++;
+              continue;
+            }
+            if ((author.followers ?? 0) > this.options.maxFollowers) {
+              skippedTooBig++;
+              continue;
+            }
             const before = this.store.queueSize();
             this.store.enqueue(userName, {
               name: tweet.author?.name,
@@ -238,7 +271,7 @@ export class AutoFollowRunner {
       }
     }
 
-    return { scanned, queued, skippedUnverified };
+    return { scanned, queued, skippedUnverified, skippedScored, skippedTooBig };
   }
 
   /**

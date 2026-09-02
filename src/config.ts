@@ -58,6 +58,9 @@ export interface AutoFollowConfig {
   dryRun: boolean;
   storageStatePath: string;
   statePath: string;
+  maxFollowers: number;
+  unfollowPerRun: number;
+  unfollowPerDay: number;
 }
 
 interface AutoFollowFile {
@@ -70,6 +73,9 @@ interface AutoFollowFile {
   unhealthyAfterZeroCycles?: number;
   allowedVerified?: string[];
   dryRun?: boolean;
+  maxFollowers?: number;
+  unfollowPerRun?: number;
+  unfollowPerDay?: number;
 }
 
 function parseAutoFollowFlags(argv: string[]): {
@@ -154,5 +160,8 @@ export function loadAutoFollowConfig(argv: string[] = process.argv): AutoFollowC
     dryRun: pick(file.dryRun, flags.dryRun, true),
     storageStatePath: resolveStorageStatePath(),
     statePath: path.join(process.cwd(), ".auth", "auto-follow-state.json"),
+    maxFollowers: file.maxFollowers ?? 500000,
+    unfollowPerRun: file.unfollowPerRun ?? 9,
+    unfollowPerDay: file.unfollowPerDay ?? 50,
   };
 }
