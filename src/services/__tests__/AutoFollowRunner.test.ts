@@ -14,8 +14,31 @@ interface FakeTweet {
     isVerified?: boolean;
     isBlueVerified?: boolean;
     verifiedType?: string | null;
+    description?: string;
+    followers?: number;
+    following?: number;
+    statusesCount?: number;
+    profilePicture?: string;
+    coverPicture?: string | null;
   };
 }
+
+/**
+ * Author fields the scoring gate (Task 6) reads, applied as defaults for any
+ * fixture that doesn't set them explicitly. Most fixtures in this file predate
+ * the scoring gate and exercise queue/follow mechanics, not content scoring —
+ * without a clean baseline, `fromSearchAuthor`'s zeroed-out defaults (0
+ * followers, 0 statuses, empty bio) trip the scorer's ghost-account and
+ * no-bio-no-banner rules and the candidate never reaches the assertions the
+ * test is actually about. A test that cares about scoring sets these fields
+ * itself, which overrides the defaults below.
+ */
+const CLEAN_AUTHOR_DEFAULTS = {
+  description: "Just a person, tweeting.",
+  followers: 1000,
+  following: 100,
+  statusesCount: 500,
+};
 
 function fakeSearch(byQuery: Record<string, FakeTweet[]>) {
   const queries: string[] = [];
@@ -23,7 +46,9 @@ function fakeSearch(byQuery: Record<string, FakeTweet[]>) {
     queries,
     async *advancedSearch(query: string, _queryType?: string): AsyncGenerator<FakeTweet> {
       queries.push(query);
-      for (const t of byQuery[query] ?? []) yield t;
+      for (const t of byQuery[query] ?? []) {
+        yield t.author ? { ...t, author: { ...CLEAN_AUTHOR_DEFAULTS, ...t.author } } : t;
+      }
     },
   };
 }
@@ -35,6 +60,9 @@ function recordingFollower(): { followed: string[] } & IFollower {
     async follow(username: string) {
       followed.push(username);
       return "followed" as const;
+    },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
     },
   };
 }
@@ -72,6 +100,7 @@ test("searches one sampled batch, queues authors, and follows up to maxPerRun", 
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1", "kw2"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -105,6 +134,7 @@ test("caps follows at maxPerRun and leaves the rest queued for next cycle", asyn
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -131,6 +161,7 @@ test("samples additional batches when the queue is still short", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"], ["kw2"], ["kw3"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   await runner.runCycle();
@@ -156,6 +187,7 @@ test("skips searching when the queue already has enough candidates", async () =>
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   await runner.runCycle();
@@ -181,6 +213,7 @@ test("does not queue users already followed", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   await runner.runCycle();
@@ -204,6 +237,7 @@ test("respects perKeyword scan cap", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -226,13 +260,15 @@ test("dryRun follows nobody and does not consume the queue", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
 
   assert.deepEqual(follower.followed, []); // dry-run follows nobody
+  assert.deepEqual(summary.followed, []); // followed stays empty in dry-run
   assert.deepEqual(
-    summary.followed.map((f) => f.userName),
+    summary.wouldFollow.map((f) => f.userName),
     ["alice"]
   ); // but reports who it would follow
   assert.equal(store.queueSize(), 1); // candidate stays queued for a real run
@@ -249,6 +285,7 @@ test("no keywords sampled and empty queue follows nobody without error", async (
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -276,6 +313,7 @@ test("summary carries timing, before/after counts, and per-followed metadata", a
     now: () => new Date(t++), // advances 1ms per call
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -309,6 +347,7 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -319,15 +358,101 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
   assert.equal(summary.followedCountAfter, 0);
   assert.equal(follower.followed.length, 0); // nobody actually followed
   assert.equal(store.queueSize(), 1); // candidate still queued (peek, not dequeue)
-  assert.equal(summary.followed[0].userName, "alice");
-  assert.equal(summary.followed[0].url, "https://x.com/alice");
-  assert.equal(summary.followed[0].keyword, "kw1");
+  assert.equal(summary.followed.length, 0); // dry-run must not report followed
+  assert.equal(summary.wouldFollow[0].userName, "alice");
+  assert.equal(summary.wouldFollow[0].url, "https://x.com/alice");
+  assert.equal(summary.wouldFollow[0].keyword, "kw1");
+});
+
+test("dry-run reports would-be targets as wouldFollow, not followed", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "alice",
+          name: "A",
+          description: "Engineer.",
+          followers: 3000,
+          following: 200,
+          statusesCount: 900,
+        },
+      },
+      {
+        author: {
+          userName: "bob",
+          name: "B",
+          description: "Researcher.",
+          followers: 4000,
+          following: 300,
+          statusesCount: 1200,
+        },
+      },
+    ],
+  });
+  const follower = recordingFollower();
+  const runner = new AutoFollowRunner(search, tmpStore(), follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.deepEqual(follower.followed, [], "dry-run must not follow");
+  assert.equal(summary.followed.length, 0, "followed must be empty in dry-run");
+  assert.equal(summary.wouldFollow.length, 2);
+  assert.equal(summary.addedCount, 0);
+});
+
+test("a real run reports followed and leaves wouldFollow empty", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "alice",
+          name: "A",
+          description: "Engineer.",
+          followers: 3000,
+          following: 200,
+          statusesCount: 900,
+        },
+      },
+    ],
+  });
+  const runner = new AutoFollowRunner(search, tmpStore(), recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.followed.length, 1);
+  assert.equal(summary.wouldFollow.length, 0);
+  assert.equal(summary.addedCount, 1);
 });
 
 function failingFollower(): IFollower {
   return {
     async follow(_username: string): Promise<never> {
       throw new Error("blocked");
+    },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
     },
   };
 }
@@ -336,6 +461,9 @@ function alreadyFollowingFollower(): IFollower {
   return {
     async follow(_username: string) {
       return "already-following" as const;
+    },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
     },
   };
 }
@@ -355,6 +483,7 @@ test("attempted-but-followed-0 increments consecutiveZeroCycles", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]), // empty batch → no search, just drain
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -383,6 +512,7 @@ test("a successful cycle resets the counter and sets lastSuccessAt", async () =>
     now: () => new Date(t++),
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -407,6 +537,7 @@ test("a cycle with nothing to attempt leaves the counter untouched", async () =>
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -431,6 +562,7 @@ test("dry-run never touches the health counter", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -499,6 +631,7 @@ test("fillQueue skips unverified authors and counts them", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: ["blue", "business"],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -510,8 +643,9 @@ test("fillQueue skips unverified authors and counts them", async () => {
   assert.deepEqual(queued, ["biz1", "verified1"]);
   const v1 = store.peek(10).find((c) => c.userName === "verified1")!;
   assert.deepEqual(v1.verified, ["blue"]);
-  // verified tiers must reach the followed summary (the JSONL log's source).
-  const summaryV1 = summary.followed.find((f) => f.userName === "verified1")!;
+  // verified tiers must reach the summary (the JSONL log's source); dry-run
+  // reports it under wouldFollow, not followed.
+  const summaryV1 = summary.wouldFollow.find((f) => f.userName === "verified1")!;
   assert.deepEqual(summaryV1.verified, ["blue"]);
 });
 
@@ -533,6 +667,7 @@ test("fillQueue with empty allowedVerified keeps everyone (filter off)", async (
     delayMs: () => 0,
     pickKeywords: scriptedPicker([["kw1"]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -558,6 +693,7 @@ test("already-following candidates count separately and stay healthy", async () 
     now: () => new Date(t++),
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -584,6 +720,7 @@ test("all-throw cycle increments the unhealthy counter", async () => {
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -607,6 +744,9 @@ test("followFailures counts only genuine throws, not already-following", async (
       if (username === "broken") throw new Error("blocked");
       return "followed" as const;
     },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
+    },
   };
   const runner = new AutoFollowRunner(search, store, mixedFollower, {
     keywords: ["kw1"],
@@ -618,6 +758,7 @@ test("followFailures counts only genuine throws, not already-following", async (
     delayMs: () => 0,
     pickKeywords: scriptedPicker([[]]),
     allowedVerified: [],
+    maxFollowers: 500000,
   });
 
   const summary = await runner.runCycle();
@@ -626,4 +767,220 @@ test("followFailures counts only genuine throws, not already-following", async (
   assert.equal(summary.addedCount, 1); // "newone"
   assert.equal(summary.alreadyFollowing, 1); // "existing"
   assert.equal(summary.followFailures, 1); // only "broken", NOT "existing"
+});
+
+test("a candidate whose bio scores above zero is not queued", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "shill",
+          name: "Shill",
+          description: "Crypto OG | KOL",
+          followers: 20000,
+          following: 500,
+          statusesCount: 3000,
+        },
+      },
+    ],
+  });
+  const follower = recordingFollower();
+  const store = tmpStore();
+  const runner = new AutoFollowRunner(search, store, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.deepEqual(follower.followed, []);
+  assert.equal(store.queueSize(), 0);
+  assert.equal(summary.skippedScored, 1);
+});
+
+test("a candidate over the follower ceiling is not queued", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "megacorp",
+          name: "Mega",
+          description: "Breaking news, fast.",
+          followers: 1371990,
+          following: 171,
+          statusesCount: 91806,
+        },
+      },
+    ],
+  });
+  const follower = recordingFollower();
+  const store = tmpStore();
+  const runner = new AutoFollowRunner(search, store, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.deepEqual(follower.followed, []);
+  assert.equal(summary.skippedTooBig, 1);
+});
+
+test("a clean candidate under the ceiling is still queued and followed", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "realdev",
+          name: "Real Dev",
+          description: "Engineer. Building things.",
+          followers: 4200,
+          following: 300,
+          statusesCount: 1800,
+        },
+      },
+    ],
+  });
+  const follower = recordingFollower();
+  const runner = new AutoFollowRunner(search, tmpStore(), follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.deepEqual(follower.followed, ["realdev"]);
+  assert.equal(summary.skippedScored, 0);
+  assert.equal(summary.skippedTooBig, 0);
+});
+
+function tmpPath(): string {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "afr-")), "s.json");
+}
+
+/**
+ * A store that reports one handle as unfollowed without evicting it from the
+ * queue, so the drain-point guard can be exercised directly. In production the
+ * store purges such handles on markUnfollowed/load/refresh; the guard exists
+ * because re-following an unfollowed account is unrecoverable, and defence in
+ * depth is cheap next to that.
+ */
+class BlocklistOverrideStore extends FollowStore {
+  constructor(
+    file: string,
+    private readonly blocked: string
+  ) {
+    super(file);
+  }
+  override wasUnfollowed(username: string): boolean {
+    return username.toLowerCase() === this.blocked || super.wasUnfollowed(username);
+  }
+}
+
+test("the drain point never follows a blocklisted candidate already in the queue", async () => {
+  const store = new BlocklistOverrideStore(tmpPath(), "spammer");
+  store.load();
+  store.enqueue("spammer");
+  store.enqueue("keeper");
+
+  const follower = recordingFollower();
+  const summary = await new AutoFollowRunner(fakeSearch({}), store, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(follower.followed, ["keeper"]);
+  assert.equal(summary.attempted, 1, "the blocklisted candidate is not counted as attempted");
+});
+
+test("a dry-run cycle does not report a blocklisted candidate as would-follow", async () => {
+  const store = new BlocklistOverrideStore(tmpPath(), "spammer");
+  store.load();
+  store.enqueue("spammer");
+  store.enqueue("keeper");
+
+  const summary = await new AutoFollowRunner(fakeSearch({}), store, recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(
+    summary.wouldFollow.map((c) => c.userName),
+    ["keeper"]
+  );
+});
+
+test("a handle unfollowed by another process is never followed on the next cycle", async () => {
+  const file = tmpPath();
+  const service = new FollowStore(file);
+  service.load();
+  service.enqueue("spammer");
+  service.enqueue("keeper");
+  service.save();
+
+  // A separate `follow-cleanup --run` process unfollows one of the queued handles.
+  const cleanup = new FollowStore(file);
+  cleanup.load();
+  cleanup.markUnfollowed("spammer");
+  cleanup.save();
+
+  // The follow service is still running on its pre-cleanup snapshot.
+  const follower = recordingFollower();
+  await new AutoFollowRunner(fakeSearch({}), service, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(follower.followed, ["keeper"]);
+  const after = new FollowStore(file);
+  after.load();
+  assert.equal(after.wasUnfollowed("spammer"), true, "the cycle's save must not erase the blocklist");
 });

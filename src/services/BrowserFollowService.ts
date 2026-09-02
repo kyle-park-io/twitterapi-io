@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { chromium, Browser, BrowserContext, Page } from "playwright";
-import { IFollower, FollowResult } from "../follow/IFollower";
+import { IFollower, FollowResult, UnfollowResult } from "../follow/IFollower";
 
 export interface BrowserFollowConfig {
   xUser: string;
@@ -10,6 +10,51 @@ export interface BrowserFollowConfig {
   xTotp?: string;
   storageStatePath: string;
   headless?: boolean;
+}
+
+/**
+ * Decide whether an unfollow attempt may be reported as "unfollowed" after the
+ * confirm-dialog step.
+ *
+ * `sawDialog` true means the confirm button was found and clicked, so the
+ * unfollow was submitted; a missing flip after that is just X being slow, and
+ * reporting success is right — the caller blocklists the handle and we never
+ * touch it again.
+ *
+ * `sawDialog` false with no flip either means nothing happened: most likely the
+ * confirmationSheetConfirm test id drifted. Returning "unfollowed" there would
+ * blocklist an account we are still following, and because the blocklist is
+ * permanent and filters the cleanup target list, that account could never be
+ * cleaned again — one selector change would burn the whole target list. So we
+ * throw: the caller records a failure, leaves the handle un-blocklisted, and a
+ * later cycle retries it. Retrying is safe precisely because unfollow()
+ * re-navigates and returns "not-following" when the profile already shows
+ * "Follow @user" — it never blind-clicks.
+ */
+export function assertUnfollowLanded(
+  username: string,
+  acted: boolean,
+  gone: boolean
+): void {
+  if (gone) return;
+  // The followed-state button surviving is treated as failure even when we did
+  // click something. An earlier version assumed "clicked but slow to update"
+  // and returned success; @BossMon_02 disproved it — the menu item was clicked,
+  // the button stayed, and the account was still followed on X afterwards. A
+  // false "unfollowed" is the expensive direction: the caller blocklists it
+  // permanently, and the blocklist filters the cleanup list, so the account can
+  // never be cleaned. Throwing costs one retry next cycle, and retrying is safe
+  // because unfollow() re-navigates and re-reads the button state rather than
+  // blind-clicking.
+  throw new Error(
+    acted
+      ? `unfollow for @${username} was submitted (a confirmation dialog or ` +
+          `"Unfollow @${username}" menu item was clicked) but the followed-state ` +
+          `button never went away — treating as NOT unfollowed`
+      : `unfollow for @${username} was not confirmed: neither a confirmation dialog ` +
+          `(confirmationSheetConfirm) nor an "Unfollow @${username}" menu item appeared, ` +
+          `and the followed-state button never went away — treating as NOT unfollowed`
+  );
 }
 
 export class BrowserFollowService implements IFollower {
@@ -171,6 +216,78 @@ export class BrowserFollowService implements IFollower {
       }
       // The followed-state button is already showing — we already follow them.
       return "already-following";
+    } finally {
+      await page.close();
+    }
+  }
+
+  async unfollow(username: string): Promise<UnfollowResult> {
+    if (!this.context) throw new Error("Not logged in — call login() first");
+    const page = await this.context.newPage();
+    try {
+      await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded" });
+
+      // The followed-state button renders as "Following @user" or "Unfollow @user"
+      // depending on the UI variant and hover state — accept either, exactly as
+      // the follow path does.
+      const followedState = page.getByRole("button", {
+        name: new RegExp(`^(Following|Unfollow) @${username}$`, "i"),
+      });
+      const followButton = page.getByRole("button", {
+        name: new RegExp(`^Follow @${username}$`, "i"),
+      });
+
+      const isFollowed = await followedState
+        .waitFor({ state: "visible", timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!isFollowed) {
+        // Already not following is a valid outcome; nothing rendering at all is not.
+        const canFollow = await followButton.isVisible({ timeout: 3000 }).catch(() => false);
+        if (canFollow) return "not-following";
+        throw new Error(
+          `neither Follow nor Following/Unfollow button rendered for @${username} within 15s`
+        );
+      }
+
+      await followedState.click();
+
+      // X has two unfollow interactions, and which one you get depends on the
+      // target's profile, not on us:
+      //   - Normal profile: the button is a wide "Following @user" and clicking
+      //     it opens a confirmation dialog.
+      //   - Profile with creator Subscriptions enabled: the header has to fit a
+      //     Subscribe button too, so Following collapses to a 36px icon labelled
+      //     "Unfollow @user" that opens a dropdown MENU instead. No dialog ever
+      //     appears, and the header afterwards reads "Subscribe to @user" —
+      //     "Follow @user" never renders, so waiting for it hangs until timeout.
+      // Race both; whichever resolves is the variant we are on.
+      const confirm = page.getByTestId("confirmationSheetConfirm");
+      const menuItem = page.getByRole("menuitem", {
+        name: new RegExp(`^Unfollow @${username}$`, "i"),
+      });
+      const variant = await Promise.race([
+        confirm.waitFor({ state: "visible", timeout: 6000 }).then(() => "dialog" as const),
+        menuItem.waitFor({ state: "visible", timeout: 6000 }).then(() => "menu" as const),
+      ]).catch(() => null);
+
+      if (variant === "dialog") await confirm.click();
+      else if (variant === "menu") await menuItem.click();
+
+      // Success = the followed-state button is gone. That covers both variants:
+      // a normal profile replaces it with "Follow @user", a subscription profile
+      // with "Subscribe to @user". Waiting for "Follow @user" specifically would
+      // never succeed on the latter and reported real unfollows as failures.
+      // As with the follow path, a slow disappearance is treated as success
+      // rather than retried — clicking again would re-follow, which is the one
+      // thing we must never do.
+      const gone = await followedState
+        .waitFor({ state: "hidden", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      assertUnfollowLanded(username, variant !== null, gone);
+      return "unfollowed";
     } finally {
       await page.close();
     }

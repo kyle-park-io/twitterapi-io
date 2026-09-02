@@ -5,6 +5,8 @@ import { UserService } from "../services/UserService";
 import { FollowStore } from "../services/FollowStore";
 import { BrowserFollowService } from "../services/BrowserFollowService";
 import { AutoFollowRunner, isUnhealthy } from "../services/AutoFollowRunner";
+import { checkCapStall } from "../services/capDetection";
+import { IFollower } from "../follow/IFollower";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -30,6 +32,20 @@ function appendLog(record: unknown): void {
   }
 }
 
+// The following-list sync is a read-API call that paginates the account's whole
+// following list (~1 request per 200 follows), so it is throttled to run at most
+// once per this window across restarts. It only exists to catch follows/unfollows
+// made by hand outside the tool — the tool's own follows are already in the
+// persisted followed-set, and a missed manual follow is harmless because the
+// browser detects the existing follow and reports "already-following".
+const FOLLOWING_SYNC_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
+
+// While the follow cap is active, real cycles are pointless (X silently drops
+// the follows), so each interval only "probes" this many queued candidates and
+// checks whether the actual following count moved. Small on purpose: enough to
+// notice the cap lifting, not enough to look like aggressive following.
+const CAP_PROBE_COUNT = 2;
+
 async function syncFollowing(
   users: UserService,
   store: FollowStore,
@@ -40,8 +56,145 @@ async function syncFollowing(
     store.add(f.userName);
     n++;
   }
+  store.setLastFollowingSyncAt(new Date());
   store.save();
   return n;
+}
+
+/**
+ * After a real cycle, compare the account's actual following count (1 read-API
+ * call) with the last observation. When two consecutive cycles land under half
+ * of their recorded follows, X's ratio-based follow cap is active: alert once
+ * and switch the loop into probe mode until the count moves again.
+ */
+async function watchCapAfterCycle(
+  users: UserService,
+  store: FollowStore,
+  xUser: string,
+  addedThisCycle: number
+): Promise<void> {
+  let actual: number;
+  try {
+    actual = (await users.getUserInfo(xUser)).following;
+  } catch (err) {
+    console.error(
+      `Cap check skipped — couldn't read actual following count: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return;
+  }
+  const result = checkCapStall({
+    addedThisCycle,
+    prevActual: store.getLastActualFollowingCount(),
+    actual,
+    stallCycles: store.getCapStallCycles(),
+  });
+  store.setLastActualFollowingCount(actual);
+  store.setCapStallCycles(result.stallCycles);
+  if (result.capReached && !store.getCapDetectedAt()) {
+    const now = new Date();
+    store.setCapDetectedAt(now);
+    store.setCapActualCount(actual);
+    appendLog({
+      type: "cap-alert",
+      at: now.toISOString(),
+      account: xUser,
+      localFollowedCount: store.followedCount(),
+      actualFollowingCount: actual,
+      note: "actual following count stopped rising — X ratio-based follow cap reached (help.x.com/en/using-x/x-follow-limit)",
+    });
+    console.error(
+      `\n⚠️⚠️⚠️  FOLLOW CAP REACHED: actual following is pinned at ~${actual} while the\n` +
+        `        tool keeps recording successes (local ${store.followedCount()}). X silently drops\n` +
+        `        follows past the account's ratio-based cap. Pausing real cycles; probing\n` +
+        `        ${CAP_PROBE_COUNT}/cycle until the count moves. Raise your follower count to lift the cap.\n`
+    );
+  }
+  store.save();
+}
+
+/**
+ * One interval's work while the cap is active: click Follow on a couple of
+ * queued candidates, then re-read the actual count. If it rose, the cap has
+ * lifted — clear the cap state and let the next interval run a normal cycle.
+ * If not, keep the probed users OUT of the followed-set and rotate them to the
+ * back of the queue so the state never records follows that didn't land.
+ */
+async function runCapProbe(
+  follower: IFollower,
+  users: UserService,
+  store: FollowStore,
+  xUser: string
+): Promise<void> {
+  // Same guard as the normal drain path: a cleanup run may have unfollowed
+  // accounts that were queued before it ran, and the probe follows for real.
+  store.refreshUnfollowed();
+  const targets = store.dequeue(CAP_PROBE_COUNT).filter((c) => {
+    if (!store.wasUnfollowed(c.userName)) return true;
+    console.warn(`[cap-probe] skipping @${c.userName} — previously unfollowed, never re-follow`);
+    return false;
+  });
+  const alreadyFollowing = new Set<string>();
+  for (const c of targets) {
+    try {
+      const result = await follower.follow(c.userName);
+      if (result === "already-following") alreadyFollowing.add(c.userName);
+      console.log(`[cap-probe] ${result} @${c.userName}`);
+    } catch (err) {
+      console.error(
+        `[cap-probe] follow failed for @${c.userName}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  let actual: number | null = null;
+  try {
+    actual = (await users.getUserInfo(xUser)).following;
+  } catch (err) {
+    console.error(
+      `Cap probe check skipped — couldn't read actual following count: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  const prev = store.getLastActualFollowingCount();
+  const lifted = actual !== null && prev !== null && actual > prev;
+  if (lifted) {
+    for (const c of targets) store.add(c.userName);
+    store.setCapDetectedAt(null);
+    store.setCapActualCount(null);
+    store.setCapStallCycles(0);
+    appendLog({
+      type: "cap-cleared",
+      at: new Date().toISOString(),
+      account: xUser,
+      localFollowedCount: store.followedCount(),
+      actualFollowingCount: actual,
+    });
+    console.log(
+      `✅ Follow cap lifted — actual following rose to ${actual}. Resuming normal cycles next interval.`
+    );
+  } else {
+    // Genuinely-already-followed users are recorded; ghosted probes go back in
+    // the queue (dequeue removed their dedupe keys, so enqueue re-adds them).
+    for (const c of targets) {
+      if (alreadyFollowing.has(c.userName)) store.add(c.userName);
+      else store.enqueue(c.userName, { name: c.name, keyword: c.keyword, verified: c.verified });
+    }
+    appendLog({
+      type: "cap-probe",
+      at: new Date().toISOString(),
+      account: xUser,
+      probed: targets.map((c) => c.userName),
+      actualFollowingCount: actual,
+      lifted: false,
+    });
+    console.warn(
+      `Follow cap still active — actual ${actual ?? "unknown"} (pinned at ~${store.getCapActualCount()} ` +
+        `since ${kst(store.getCapDetectedAt())}); probed ${targets.length}, queue ${store.queueSize()}.`
+    );
+  }
+  if (actual !== null) store.setLastActualFollowingCount(actual);
+  store.setLastRun(new Date());
+  store.save();
 }
 
 async function main() {
@@ -73,6 +226,7 @@ async function main() {
     maxPerRun: config.maxPerRun,
     dryRun: config.dryRun,
     allowedVerified: config.allowedVerified,
+    maxFollowers: config.maxFollowers,
   });
 
   let stopping = false;
@@ -96,14 +250,26 @@ async function main() {
     console.log("Logged in.");
 
     // Best-effort: merge the account's real following list into the followed-set
-    // so already-followed accounts stop being queued. If it fails, warn and keep
-    // going — a redundant follow attempt later is a harmless no-op.
-    try {
-      const n = await syncFollowing(users, store, config.xUser);
-      console.log(`Synced ${n} existing follows from X.`);
-    } catch (err) {
-      console.error(
-        `Following sync failed (continuing anyway): ${err instanceof Error ? err.message : String(err)}`
+    // so already-followed accounts stop being queued. Throttled to once every
+    // FOLLOWING_SYNC_INTERVAL_MS so frequent restarts don't each re-page the whole
+    // list. If it fails, warn and keep going — a redundant follow attempt later is
+    // a harmless no-op.
+    const lastSync = store.getLastFollowingSyncAt();
+    const sinceSyncMs = lastSync ? Date.now() - lastSync.getTime() : Infinity;
+    if (sinceSyncMs >= FOLLOWING_SYNC_INTERVAL_MS) {
+      try {
+        const n = await syncFollowing(users, store, config.xUser);
+        console.log(`Synced ${n} existing follows from X.`);
+      } catch (err) {
+        console.error(
+          `Following sync failed (continuing anyway): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    } else {
+      const hrs = Math.round(sinceSyncMs / 3_600_000);
+      const everyH = FOLLOWING_SYNC_INTERVAL_MS / 3_600_000;
+      console.log(
+        `Following sync skipped — last synced ~${hrs}h ago (throttled to every ${everyH}h).`
       );
     }
   }
@@ -127,17 +293,40 @@ async function main() {
     }
   }
 
+  if (!config.dryRun && store.getCapDetectedAt()) {
+    console.warn(
+      `⚠️ Follow cap active since ${kst(store.getCapDetectedAt())} (actual pinned at ` +
+        `~${store.getCapActualCount()}) — probe mode (${CAP_PROBE_COUNT}/cycle) until the count rises.`
+    );
+  }
+
   while (!stopping) {
     const started = new Date();
+    if (!config.dryRun && store.getCapDetectedAt()) {
+      console.log(`\n[${kst(started)}] Follow cap active — probing instead of a full cycle...`);
+      try {
+        await runCapProbe(follower, users, store, config.xUser);
+      } catch (err) {
+        console.error("Cap probe error:", err instanceof Error ? err.message : String(err));
+      }
+      if (stopping) break;
+      console.log(`Sleeping ${config.intervalMinutes}m until next cycle...`);
+      await sleep(config.intervalMinutes * 60_000);
+      continue;
+    }
     console.log(`\n[${kst(started)}] Running cycle...`);
     try {
       const summary = await runner.runCycle();
       console.log(
         `Cycle done — scanned ${summary.scanned}, ` +
-          `queued ${summary.queued}, followed ${summary.followed.length}, ` +
+          `queued ${summary.queued}, ` +
+          `${summary.dryRun ? `would-follow ${summary.wouldFollow.length}` : `followed ${summary.followed.length}`}, ` +
           `already-following ${summary.alreadyFollowing}`
       );
       appendLog({ type: "cycle", ...summary });
+      if (!summary.dryRun && summary.addedCount > 0) {
+        await watchCapAfterCycle(users, store, config.xUser, summary.addedCount);
+      }
       if (!summary.dryRun && isUnhealthy(summary.consecutiveZeroCycles, config.unhealthyAfterZeroCycles)) {
         console.error(
           `\n⚠️⚠️⚠️  UNHEALTHY: ${summary.consecutiveZeroCycles} consecutive cycles ` +

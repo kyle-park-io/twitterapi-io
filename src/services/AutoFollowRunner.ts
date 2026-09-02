@@ -1,5 +1,6 @@
 import { IFollower } from "../follow/IFollower";
 import { FollowStore } from "./FollowStore";
+import { scoreAccount, fromSearchAuthor } from "../follow/scoring";
 
 export type VerifiedTier = "blue" | "legacy" | "business" | "government";
 
@@ -39,6 +40,12 @@ interface AuthoredTweet {
     isVerified?: boolean;
     isBlueVerified?: boolean;
     verifiedType?: string | null;
+    description?: string | null;
+    followers?: number;
+    following?: number;
+    statusesCount?: number;
+    profilePicture?: string | null;
+    coverPicture?: string | null;
   };
 }
 
@@ -64,6 +71,8 @@ export interface AutoFollowRunnerOptions {
   pickKeywords?: (all: string[], n: number) => string[];
   /** Verification tiers allowed through the filter; empty = filter off. */
   allowedVerified: VerifiedTier[];
+  /** Follower-count ceiling; candidates above this are rejected before enqueueing. */
+  maxFollowers: number;
 }
 
 export interface FollowedCandidate {
@@ -101,8 +110,14 @@ export interface CycleSummary {
   consecutiveZeroCycles: number;
   /** Candidates rejected by the verified filter this cycle. */
   skippedUnverified: number;
-  /** Followed (or, in dry-run, would-follow) candidates with metadata. */
+  /** Candidates rejected by the cleanup scoring function (score > 0) this cycle. */
+  skippedScored: number;
+  /** Candidates rejected for exceeding the follower ceiling this cycle. */
+  skippedTooBig: number;
+  /** Followed candidates with metadata (real runs only; empty in dry-run). */
   followed: FollowedCandidate[];
+  /** Candidates a dry-run would have followed. Empty in a real run. */
+  wouldFollow: FollowedCandidate[];
   dryRun: boolean;
 }
 
@@ -148,7 +163,7 @@ export class AutoFollowRunner {
     const started = this.now();
     const followedCountBefore = this.store.followedCount();
     const fill = await this.fillQueue();
-    const { followed, attempted, alreadyFollowing } = await this.drainQueue();
+    const { followed, wouldFollow, attempted, alreadyFollowing } = await this.drainQueue();
     const followedCountAfter = this.store.followedCount();
     const finished = this.now();
 
@@ -176,6 +191,8 @@ export class AutoFollowRunner {
       scanned: fill.scanned,
       queued: fill.queued,
       skippedUnverified: fill.skippedUnverified,
+      skippedScored: fill.skippedScored,
+      skippedTooBig: fill.skippedTooBig,
       followedCountBefore,
       followedCountAfter,
       addedCount: this.options.dryRun ? 0 : followed.length,
@@ -184,6 +201,7 @@ export class AutoFollowRunner {
       followFailures: this.options.dryRun ? 0 : attempted - followed.length - alreadyFollowing,
       consecutiveZeroCycles: this.store.getConsecutiveZeroCycles(),
       followed,
+      wouldFollow,
       dryRun: this.options.dryRun,
     };
   }
@@ -194,10 +212,18 @@ export class AutoFollowRunner {
    * cycle is exhausted (an empty sample). Returns how many tweets were scanned and how
    * many new candidates were queued.
    */
-  private async fillQueue(): Promise<{ scanned: number; queued: number; skippedUnverified: number }> {
+  private async fillQueue(): Promise<{
+    scanned: number;
+    queued: number;
+    skippedUnverified: number;
+    skippedScored: number;
+    skippedTooBig: number;
+  }> {
     let scanned = 0;
     let queued = 0;
     let skippedUnverified = 0;
+    let skippedScored = 0;
+    let skippedTooBig = 0;
     const usedThisCycle = new Set<string>();
 
     while (this.store.queueSize() < this.options.maxPerRun) {
@@ -221,6 +247,16 @@ export class AutoFollowRunner {
               skippedUnverified++;
               continue;
             }
+            // userName was read from tweet.author above, so it must be defined here.
+            const author = tweet.author!;
+            if (scoreAccount(fromSearchAuthor(author)).score > 0) {
+              skippedScored++;
+              continue;
+            }
+            if ((author.followers ?? 0) > this.options.maxFollowers) {
+              skippedTooBig++;
+              continue;
+            }
             const before = this.store.queueSize();
             this.store.enqueue(userName, {
               name: tweet.author?.name,
@@ -238,7 +274,7 @@ export class AutoFollowRunner {
       }
     }
 
-    return { scanned, queued, skippedUnverified };
+    return { scanned, queued, skippedUnverified, skippedScored, skippedTooBig };
   }
 
   /**
@@ -250,6 +286,7 @@ export class AutoFollowRunner {
    */
   private async drainQueue(): Promise<{
     followed: FollowedCandidate[];
+    wouldFollow: FollowedCandidate[];
     attempted: number;
     alreadyFollowing: number;
   }> {
@@ -269,12 +306,21 @@ export class AutoFollowRunner {
     });
 
     if (this.options.dryRun) {
-      const targets = this.store.peek(this.options.maxPerRun);
+      const targets = this.withoutUnfollowed(this.store.peek(this.options.maxPerRun));
       for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
-      return { followed: targets.map(toCandidate), attempted: 0, alreadyFollowing: 0 };
+      return {
+        followed: [],
+        wouldFollow: targets.map(toCandidate),
+        attempted: 0,
+        alreadyFollowing: 0,
+      };
     }
 
-    const targets = this.store.dequeue(this.options.maxPerRun);
+    // A separate cleanup process may have unfollowed accounts that were queued
+    // before it ran, so re-read the blocklist from disk before touching the
+    // queue rather than trusting a snapshot taken when this process started.
+    this.store.refreshUnfollowed();
+    const targets = this.withoutUnfollowed(this.store.dequeue(this.options.maxPerRun));
     const followed: FollowedCandidate[] = [];
     let alreadyFollowing = 0;
     for (let i = 0; i < targets.length; i++) {
@@ -297,6 +343,21 @@ export class AutoFollowRunner {
         );
       }
     }
-    return { followed, attempted: targets.length, alreadyFollowing };
+    return { followed, wouldFollow: [], attempted: targets.length, alreadyFollowing };
+  }
+
+  /**
+   * Last line of defence before a follow: drop anything on the unfollow
+   * blocklist. The store already refuses to enqueue or restore such handles,
+   * but re-following an account we unfollowed is the one mistake that cannot be
+   * undone — X treats follow/unfollow churn as spam — so the drain point checks
+   * again on candidates that are already in hand.
+   */
+  private withoutUnfollowed<T extends { userName: string }>(candidates: T[]): T[] {
+    return candidates.filter((c) => {
+      if (!this.store.wasUnfollowed(c.userName)) return true;
+      console.warn(`Skipping @${c.userName} — previously unfollowed, must never be re-followed`);
+      return false;
+    });
   }
 }
