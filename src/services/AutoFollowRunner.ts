@@ -114,8 +114,10 @@ export interface CycleSummary {
   skippedScored: number;
   /** Candidates rejected for exceeding the follower ceiling this cycle. */
   skippedTooBig: number;
-  /** Followed (or, in dry-run, would-follow) candidates with metadata. */
+  /** Followed candidates with metadata (real runs only; empty in dry-run). */
   followed: FollowedCandidate[];
+  /** Candidates a dry-run would have followed. Empty in a real run. */
+  wouldFollow: FollowedCandidate[];
   dryRun: boolean;
 }
 
@@ -161,7 +163,7 @@ export class AutoFollowRunner {
     const started = this.now();
     const followedCountBefore = this.store.followedCount();
     const fill = await this.fillQueue();
-    const { followed, attempted, alreadyFollowing } = await this.drainQueue();
+    const { followed, wouldFollow, attempted, alreadyFollowing } = await this.drainQueue();
     const followedCountAfter = this.store.followedCount();
     const finished = this.now();
 
@@ -199,6 +201,7 @@ export class AutoFollowRunner {
       followFailures: this.options.dryRun ? 0 : attempted - followed.length - alreadyFollowing,
       consecutiveZeroCycles: this.store.getConsecutiveZeroCycles(),
       followed,
+      wouldFollow,
       dryRun: this.options.dryRun,
     };
   }
@@ -283,6 +286,7 @@ export class AutoFollowRunner {
    */
   private async drainQueue(): Promise<{
     followed: FollowedCandidate[];
+    wouldFollow: FollowedCandidate[];
     attempted: number;
     alreadyFollowing: number;
   }> {
@@ -304,7 +308,12 @@ export class AutoFollowRunner {
     if (this.options.dryRun) {
       const targets = this.store.peek(this.options.maxPerRun);
       for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
-      return { followed: targets.map(toCandidate), attempted: 0, alreadyFollowing: 0 };
+      return {
+        followed: [],
+        wouldFollow: targets.map(toCandidate),
+        attempted: 0,
+        alreadyFollowing: 0,
+      };
     }
 
     const targets = this.store.dequeue(this.options.maxPerRun);
@@ -330,6 +339,6 @@ export class AutoFollowRunner {
         );
       }
     }
-    return { followed, attempted: targets.length, alreadyFollowing };
+    return { followed, wouldFollow: [], attempted: targets.length, alreadyFollowing };
   }
 }

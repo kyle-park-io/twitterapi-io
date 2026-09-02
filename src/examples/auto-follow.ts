@@ -312,7 +312,8 @@ async function main() {
       const summary = await runner.runCycle();
       console.log(
         `Cycle done — scanned ${summary.scanned}, ` +
-          `queued ${summary.queued}, followed ${summary.followed.length}, ` +
+          `queued ${summary.queued}, ` +
+          `${summary.dryRun ? `would-follow ${summary.wouldFollow.length}` : `followed ${summary.followed.length}`}, ` +
           `already-following ${summary.alreadyFollowing}`
       );
       appendLog({ type: "cycle", ...summary });

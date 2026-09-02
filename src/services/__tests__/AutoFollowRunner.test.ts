@@ -266,8 +266,9 @@ test("dryRun follows nobody and does not consume the queue", async () => {
   const summary = await runner.runCycle();
 
   assert.deepEqual(follower.followed, []); // dry-run follows nobody
+  assert.deepEqual(summary.followed, []); // followed stays empty in dry-run
   assert.deepEqual(
-    summary.followed.map((f) => f.userName),
+    summary.wouldFollow.map((f) => f.userName),
     ["alice"]
   ); // but reports who it would follow
   assert.equal(store.queueSize(), 1); // candidate stays queued for a real run
@@ -357,9 +358,92 @@ test("dry-run reports would-follow candidates with addedCount 0 and no queue con
   assert.equal(summary.followedCountAfter, 0);
   assert.equal(follower.followed.length, 0); // nobody actually followed
   assert.equal(store.queueSize(), 1); // candidate still queued (peek, not dequeue)
-  assert.equal(summary.followed[0].userName, "alice");
-  assert.equal(summary.followed[0].url, "https://x.com/alice");
-  assert.equal(summary.followed[0].keyword, "kw1");
+  assert.equal(summary.followed.length, 0); // dry-run must not report followed
+  assert.equal(summary.wouldFollow[0].userName, "alice");
+  assert.equal(summary.wouldFollow[0].url, "https://x.com/alice");
+  assert.equal(summary.wouldFollow[0].keyword, "kw1");
+});
+
+test("dry-run reports would-be targets as wouldFollow, not followed", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "alice",
+          name: "A",
+          description: "Engineer.",
+          followers: 3000,
+          following: 200,
+          statusesCount: 900,
+        },
+      },
+      {
+        author: {
+          userName: "bob",
+          name: "B",
+          description: "Researcher.",
+          followers: 4000,
+          following: 300,
+          statusesCount: 1200,
+        },
+      },
+    ],
+  });
+  const follower = recordingFollower();
+  const runner = new AutoFollowRunner(search, tmpStore(), follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.deepEqual(follower.followed, [], "dry-run must not follow");
+  assert.equal(summary.followed.length, 0, "followed must be empty in dry-run");
+  assert.equal(summary.wouldFollow.length, 2);
+  assert.equal(summary.addedCount, 0);
+});
+
+test("a real run reports followed and leaves wouldFollow empty", async () => {
+  const search = fakeSearch({
+    kw1: [
+      {
+        author: {
+          userName: "alice",
+          name: "A",
+          description: "Engineer.",
+          followers: 3000,
+          following: 200,
+          statusesCount: 900,
+        },
+      },
+    ],
+  });
+  const runner = new AutoFollowRunner(search, tmpStore(), recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 10,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([["kw1"]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  });
+
+  const summary = await runner.runCycle();
+
+  assert.equal(summary.followed.length, 1);
+  assert.equal(summary.wouldFollow.length, 0);
+  assert.equal(summary.addedCount, 1);
 });
 
 function failingFollower(): IFollower {
@@ -559,8 +643,9 @@ test("fillQueue skips unverified authors and counts them", async () => {
   assert.deepEqual(queued, ["biz1", "verified1"]);
   const v1 = store.peek(10).find((c) => c.userName === "verified1")!;
   assert.deepEqual(v1.verified, ["blue"]);
-  // verified tiers must reach the followed summary (the JSONL log's source).
-  const summaryV1 = summary.followed.find((f) => f.userName === "verified1")!;
+  // verified tiers must reach the summary (the JSONL log's source); dry-run
+  // reports it under wouldFollow, not followed.
+  const summaryV1 = summary.wouldFollow.find((f) => f.userName === "verified1")!;
   assert.deepEqual(summaryV1.verified, ["blue"]);
 });
 
