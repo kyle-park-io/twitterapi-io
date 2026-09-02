@@ -1,7 +1,7 @@
 {
   "keywords": [
-    "AI agents min_faves:250",
-    "agentic AI min_faves:200",
+    "AI agents min_faves:120",
+    "agentic AI min_faves:100",
     "autonomous agents min_faves:150",
     "AI agent wallet min_faves:100",
     "AI 에이전트 min_faves:50",
@@ -17,7 +17,6 @@
     "MCP 서버 min_faves:20",
 
     "crypto AI agents min_faves:150",
-    "onchain AI min_faves:120",
     "DeFi agents min_faves:100",
     "온체인 AI min_faves:30",
     "크립토 AI min_faves:30",
@@ -42,7 +41,6 @@
     "인포파이 min_faves:20",
 
     "quant trading min_faves:100",
-    "algorithmic trading min_faves:100",
     "systematic trading min_faves:80",
     "trading strategy min_faves:150",
     "AI trading min_faves:100",
@@ -63,9 +61,8 @@
     "에어드랍 min_faves:20",
 
     "solana min_faves:150",
-    "ethereum min_faves:200",
-    "bitcoin min_faves:250",
-    "RWA min_faves:120",
+    "ethereum min_faves:100",
+    "bitcoin min_faves:120",
     "tokenization min_faves:120",
     "stablecoin min_faves:120",
     "비트코인 min_faves:30",
@@ -81,15 +78,13 @@
 
     "hedge fund min_faves:150",
     "options trading min_faves:120",
-    "futures trading min_faves:120",
     "트레이딩 min_faves:20",
     "투자 min_faves:30",
 
     "machine learning min_faves:150",
     "AI research min_faves:120",
-    "GPT min_faves:200",
+    "GPT min_faves:100",
     "AI startup min_faves:100",
-    "diffusion models min_faves:80",
     "fine-tuning min_faves:60",
     "머신러닝 min_faves:20",
     "인공지능 min_faves:30",
@@ -109,7 +104,6 @@
     "memecoin min_faves:120",
     "NFT min_faves:150",
     "DAO min_faves:100",
-    "web3 min_faves:150",
     "validator min_faves:60",
     "밈코인 min_faves:20",
     "웹3 min_faves:20",
@@ -128,6 +122,9 @@
   "keywordsPerCycle": 3,
   "maxPerRun": 25,
   "unhealthyAfterZeroCycles": 2,
+  "maxFollowers": 500000,
+  "unfollowPerRun": 9,
+  "unfollowPerDay": 50,
   "allowedVerified": ["blue", "legacy", "business", "government"],
   "dryRun": true
 }
