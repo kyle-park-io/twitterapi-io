@@ -22,7 +22,8 @@
     "save-session": "ts-node src/examples/save-session.ts",
     "import-session": "ts-node src/examples/import-session.ts",
     "follow-audit": "ts-node src/examples/follow-audit.ts",
-    "follow-status": "ts-node src/examples/follow-status.ts"
+    "follow-status": "ts-node src/examples/follow-status.ts",
+    "follow-cleanup": "ts-node src/examples/follow-cleanup.ts"
   },
   "repository": {
     "type": "git",
