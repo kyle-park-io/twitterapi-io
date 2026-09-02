@@ -7,8 +7,8 @@
 ## Problem
 
 The auto-follow loop ran for 23 days and followed 7,618 accounts. It then hit X's
-ratio cap at ~7,500 and has been idle in probe mode since 2026-07-29 — five weeks
-with zero real cycles.
+ratio cap at ~7,500, and has issued no follow at all since 2026-07-29 — five
+weeks idle (in dry-run rather than cap-probe mode; see Current service state).
 
 The working hypothesis going in was that the list had filled with scam and
 promotional accounts. A full census of all 7,468 current followings says
@@ -146,13 +146,19 @@ The same scoring function gates new follows: **only score 0 is followed.** The
 exit rule and the entry rule are the same rule, so the list cannot re-contaminate
 by the mechanism that filled it.
 
-Three further filters, each justified by the keyword analysis below:
+Two further filters, each justified by the keyword analysis below:
 
 | Filter | Rule | Rationale |
 | --- | --- | --- |
 | Follower ceiling | skip if followers > 500,000 | 500k is where media orgs, clubs and celebrities dominate the sample |
-| Activity | skip if no tweet in the last 30 days | excludes abandoned and parked accounts; costs one read call per candidate |
 | Score gate | skip unless score = 0 | the rule above |
+
+**Recent activity needs no filter.** Candidates are authors of tweets returned by
+`advanced_search` with `queryType: "Latest"`, so every candidate has by
+construction tweeted recently enough to appear in a chronological search. An
+explicit activity check would spend one read call per candidate re-deriving a
+property the pipeline already guarantees. Revisit only if the search ever moves
+to `queryType: "Top"`.
 
 ### Keyword changes
 
@@ -189,8 +195,16 @@ are historical — earlier commits already lowered them.)
 
 ### `src/follow/scoring.ts` (new)
 
-Pure function, no I/O — the whole point is that it is directly testable against
-the census data.
+Pure functions, no I/O — the whole point is that they are directly testable
+against the census data.
+
+The two sources name the same fields differently: `/twitter/user/followings`
+returns snake_case (`followers_count`, `friends_count`, `statuses_count`,
+`profile_image_url_https`, `profile_banner_url`) while `advanced_search` tweet
+authors return camelCase (`followers`, `following`, `statusesCount`,
+`profilePicture`, `coverPicture`). `scoreAccount` therefore takes a normalised
+shape, and two adapters — `fromFollowingsRecord` and `fromSearchAuthor` — are the
+only places either wire format is named.
 
 ```ts
 export interface ScoredAccount {
@@ -271,23 +285,42 @@ New fields:
 | Field | Default | Purpose |
 | --- | --- | --- |
 | `maxFollowers` | `500000` | intake follower ceiling |
-| `requireRecentActivityDays` | `30` | intake activity window |
-| `unfollowPerHour` | `9` | cleanup rate |
-| `unfollowPerDay` | `50` | cleanup daily cap |
+| `unfollowPerRun` | `9` | unfollows per cleanup invocation; one invocation per hour |
+| `unfollowPerDay` | `50` | cleanup daily cap, raised to 100 after the first two days |
 
 Plus the keyword edits above.
 
 ### Log-integrity fix
 
-`output/auto-follow-log.jsonl` is corrupted for analysis: on cycles with
-`addedCount: 0` the `followed` array is written with the previous batch's 25
-entries instead of empty. 354 such cycles repeat the same accounts, so 16,468
-logged entries collapse to 7,622 unique — a 53.7% duplication rate that silently
-inflated the first pass of the keyword analysis by ~3×.
+`output/auto-follow-log.jsonl` is unusable for analysis as written. In dry-run,
+`drainQueue` returns `targets.map(toCandidate)` and `runCycle` reports that array
+as `followed` while setting `addedCount: 0`. The dry-run queue never drains, so
+every hour logs the same top-25 candidates under a field named "followed".
 
-Fix the writer so `followed` reflects only the current cycle. Past lines stay as
-they are; any future analysis must filter to
+Across 354 such cycles this turns 16,468 logged entries into 7,622 unique ones —
+a 53.7% duplication rate that inflated the first pass of the keyword analysis
+roughly threefold before it was caught.
+
+Rename the dry-run payload so the field name matches its meaning: report
+would-be targets as `wouldFollow` and leave `followed` empty when `dryRun` is
+set. `follow-status` reads only `addedCount` from these records and needs no
+change, but the cycle console line in `auto-follow.ts` prints
+`summary.followed.length` and must be updated to report the right field per mode.
+
+Past log lines stay as they are; any analysis over historical data must filter to
 `addedCount > 0 && followed.length === addedCount`, as this design's numbers do.
+
+### Current service state
+
+The loop is **not** in cap-probe mode, despite `capDetectedAt` being set in
+`.auth/auto-follow-state.json`. `config/auto-follow.json` has `dryRun: true`
+committed with no working-tree override, so since 2026-07-29 the service has
+only been printing `[dry-run] would follow` once an hour. No follow has actually
+been issued in that time.
+
+This means step 4 of Sequencing ("stop the service") is a formality rather than a
+race to avoid — but it stays in the plan, because resuming real follows requires
+setting `dryRun: false`, and that must not happen until the cleanup has finished.
 
 ## Data flow
 
