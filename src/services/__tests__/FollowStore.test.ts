@@ -324,3 +324,44 @@ test("a removed user can be re-queued", () => {
   assert.equal(store.queueSize(), 1);
   assert.equal(store.isQueued("bob"), true);
 });
+
+test("markUnfollowed is case-insensitive and queryable", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.markUnfollowed("Spammer");
+  assert.equal(store.wasUnfollowed("spammer"), true);
+  assert.equal(store.wasUnfollowed("SPAMMER"), true);
+  assert.equal(store.unfollowedCount(), 1);
+});
+
+test("enqueue skips a previously unfollowed user", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.markUnfollowed("spammer");
+  store.enqueue("spammer");
+  assert.equal(store.queueSize(), 0);
+  assert.equal(store.isQueued("spammer"), false);
+});
+
+test("unfollowed set round-trips through save and load", () => {
+  const file = tmpFile();
+  const a = new FollowStore(file);
+  a.load();
+  a.markUnfollowed("spammer");
+  a.save();
+
+  const b = new FollowStore(file);
+  b.load();
+  assert.equal(b.wasUnfollowed("spammer"), true);
+});
+
+test("removing from the followed set does not clear the unfollowed record", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.add("spammer");
+  store.markUnfollowed("spammer");
+  store.remove("spammer");
+  assert.equal(store.wasUnfollowed("spammer"), true);
+  store.enqueue("spammer");
+  assert.equal(store.queueSize(), 0);
+});

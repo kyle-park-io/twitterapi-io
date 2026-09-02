@@ -19,6 +19,7 @@ interface FollowStoreData {
   capStallCycles?: number;
   capDetectedAt?: string | null;
   capActualCount?: number | null;
+  unfollowed?: string[];
 }
 
 function normalizeCandidate(item: string | Candidate): Candidate | null {
@@ -40,6 +41,12 @@ export class FollowStore {
   private capStallCycles = 0;
   private capDetectedAt: Date | null = null;
   private capActualCount: number | null = null;
+  /**
+   * Handles we have unfollowed. Append-only and never cleared — X prohibits
+   * re-following an account you unfollowed, so this set permanently excludes
+   * them from the candidate queue.
+   */
+  private unfollowed = new Set<string>();
 
   constructor(private readonly filePath: string) {}
 
@@ -62,6 +69,7 @@ export class FollowStore {
       this.capStallCycles = data.capStallCycles ?? 0;
       this.capDetectedAt = data.capDetectedAt ? new Date(data.capDetectedAt) : null;
       this.capActualCount = data.capActualCount ?? null;
+      this.unfollowed = new Set((data.unfollowed ?? []).map((u) => u.toLowerCase()));
     } catch {
       this.followed = new Set();
       this.queue = [];
@@ -74,6 +82,7 @@ export class FollowStore {
       this.capStallCycles = 0;
       this.capDetectedAt = null;
       this.capActualCount = null;
+      this.unfollowed = new Set();
     }
   }
 
@@ -94,13 +103,26 @@ export class FollowStore {
     return this.followed.size;
   }
 
-  /** Queue a candidate to follow later. Skips users already followed or already queued. */
+  /** Record a handle as unfollowed. Permanent — never removed. */
+  markUnfollowed(username: string): void {
+    this.unfollowed.add(username.toLowerCase());
+  }
+
+  wasUnfollowed(username: string): boolean {
+    return this.unfollowed.has(username.toLowerCase());
+  }
+
+  unfollowedCount(): number {
+    return this.unfollowed.size;
+  }
+
+  /** Queue a candidate to follow later. Skips users already followed, already queued, or unfollowed. */
   enqueue(
     username: string,
     meta?: { name?: string; keyword?: string; verified?: string[] }
   ): void {
     const key = username.toLowerCase();
-    if (this.followed.has(key) || this.queuedKeys.has(key)) return;
+    if (this.followed.has(key) || this.queuedKeys.has(key) || this.unfollowed.has(key)) return;
     this.queue.push({ userName: username, ...meta });
     this.queuedKeys.add(key);
   }
@@ -205,6 +227,7 @@ export class FollowStore {
       capStallCycles: this.capStallCycles,
       capDetectedAt: this.capDetectedAt ? this.capDetectedAt.toISOString() : null,
       capActualCount: this.capActualCount,
+      unfollowed: [...this.unfollowed],
     };
     fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
   }
