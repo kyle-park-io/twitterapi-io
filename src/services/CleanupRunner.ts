@@ -91,6 +91,12 @@ export class CleanupRunner {
         // must never be re-followed.
         this.store.markUnfollowed(t.userName);
         this.store.remove(t.userName);
+        this.store.recordUnfollow();
+        // Persist per unfollow, not per cycle. A cycle is ~8 minutes of sleeps;
+        // an interrupt partway through used to leave every unfollow so far
+        // performed on X but unrecorded here — irreversible actions with no
+        // record, and the handles would be re-followed by the follow loop.
+        this.store.save();
         if (result === "unfollowed") {
           unfollowed.push(t);
           console.log(`Unfollowed @${t.userName} (score ${t.score}: ${t.reasons.join(", ")})`);
@@ -109,7 +115,9 @@ export class CleanupRunner {
       }
     }
 
-    this.store.save();
+    // No end-of-cycle save: every unfollow is already durable, and a blanket
+    // rewrite here would only risk overwriting another process's state with a
+    // snapshot that has nothing new in it.
     const finishedAt = new Date();
     return {
       startedAt: startedAt.toISOString(),

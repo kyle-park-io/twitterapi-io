@@ -306,7 +306,7 @@ export class AutoFollowRunner {
     });
 
     if (this.options.dryRun) {
-      const targets = this.store.peek(this.options.maxPerRun);
+      const targets = this.withoutUnfollowed(this.store.peek(this.options.maxPerRun));
       for (const c of targets) console.log(`[dry-run] would follow @${c.userName}`);
       return {
         followed: [],
@@ -316,7 +316,11 @@ export class AutoFollowRunner {
       };
     }
 
-    const targets = this.store.dequeue(this.options.maxPerRun);
+    // A separate cleanup process may have unfollowed accounts that were queued
+    // before it ran, so re-read the blocklist from disk before touching the
+    // queue rather than trusting a snapshot taken when this process started.
+    this.store.refreshUnfollowed();
+    const targets = this.withoutUnfollowed(this.store.dequeue(this.options.maxPerRun));
     const followed: FollowedCandidate[] = [];
     let alreadyFollowing = 0;
     for (let i = 0; i < targets.length; i++) {
@@ -340,5 +344,20 @@ export class AutoFollowRunner {
       }
     }
     return { followed, wouldFollow: [], attempted: targets.length, alreadyFollowing };
+  }
+
+  /**
+   * Last line of defence before a follow: drop anything on the unfollow
+   * blocklist. The store already refuses to enqueue or restore such handles,
+   * but re-following an account we unfollowed is the one mistake that cannot be
+   * undone — X treats follow/unfollow churn as spam — so the drain point checks
+   * again on candidates that are already in hand.
+   */
+  private withoutUnfollowed<T extends { userName: string }>(candidates: T[]): T[] {
+    return candidates.filter((c) => {
+      if (!this.store.wasUnfollowed(c.userName)) return true;
+      console.warn(`Skipping @${c.userName} — previously unfollowed, must never be re-followed`);
+      return false;
+    });
   }
 }

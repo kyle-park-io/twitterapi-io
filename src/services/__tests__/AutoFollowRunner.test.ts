@@ -877,3 +877,110 @@ test("a clean candidate under the ceiling is still queued and followed", async (
   assert.equal(summary.skippedScored, 0);
   assert.equal(summary.skippedTooBig, 0);
 });
+
+function tmpPath(): string {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "afr-")), "s.json");
+}
+
+/**
+ * A store that reports one handle as unfollowed without evicting it from the
+ * queue, so the drain-point guard can be exercised directly. In production the
+ * store purges such handles on markUnfollowed/load/refresh; the guard exists
+ * because re-following an unfollowed account is unrecoverable, and defence in
+ * depth is cheap next to that.
+ */
+class BlocklistOverrideStore extends FollowStore {
+  constructor(
+    file: string,
+    private readonly blocked: string
+  ) {
+    super(file);
+  }
+  override wasUnfollowed(username: string): boolean {
+    return username.toLowerCase() === this.blocked || super.wasUnfollowed(username);
+  }
+}
+
+test("the drain point never follows a blocklisted candidate already in the queue", async () => {
+  const store = new BlocklistOverrideStore(tmpPath(), "spammer");
+  store.load();
+  store.enqueue("spammer");
+  store.enqueue("keeper");
+
+  const follower = recordingFollower();
+  const summary = await new AutoFollowRunner(fakeSearch({}), store, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(follower.followed, ["keeper"]);
+  assert.equal(summary.attempted, 1, "the blocklisted candidate is not counted as attempted");
+});
+
+test("a dry-run cycle does not report a blocklisted candidate as would-follow", async () => {
+  const store = new BlocklistOverrideStore(tmpPath(), "spammer");
+  store.load();
+  store.enqueue("spammer");
+  store.enqueue("keeper");
+
+  const summary = await new AutoFollowRunner(fakeSearch({}), store, recordingFollower(), {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: true,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(
+    summary.wouldFollow.map((c) => c.userName),
+    ["keeper"]
+  );
+});
+
+test("a handle unfollowed by another process is never followed on the next cycle", async () => {
+  const file = tmpPath();
+  const service = new FollowStore(file);
+  service.load();
+  service.enqueue("spammer");
+  service.enqueue("keeper");
+  service.save();
+
+  // A separate `follow-cleanup --run` process unfollows one of the queued handles.
+  const cleanup = new FollowStore(file);
+  cleanup.load();
+  cleanup.markUnfollowed("spammer");
+  cleanup.save();
+
+  // The follow service is still running on its pre-cleanup snapshot.
+  const follower = recordingFollower();
+  await new AutoFollowRunner(fakeSearch({}), service, follower, {
+    keywords: ["kw1"],
+    queryType: "Latest",
+    perKeyword: 30,
+    keywordsPerCycle: 1,
+    maxPerRun: 5,
+    dryRun: false,
+    delayMs: () => 0,
+    pickKeywords: scriptedPicker([[]]),
+    allowedVerified: [],
+    maxFollowers: 500000,
+  }).runCycle();
+
+  assert.deepEqual(follower.followed, ["keeper"]);
+  const after = new FollowStore(file);
+  after.load();
+  assert.equal(after.wasUnfollowed("spammer"), true, "the cycle's save must not erase the blocklist");
+});

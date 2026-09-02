@@ -96,4 +96,11 @@ function main() {
   console.log(`  Recent cycles (added): ${spark}`);
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  // A corrupt state file now throws rather than silently reading as empty —
+  // print it plainly instead of dumping a stack trace at the operator.
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}

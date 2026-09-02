@@ -5,6 +5,7 @@ import { loadAutoFollowConfig } from "../config";
 import { BrowserFollowService } from "../services/BrowserFollowService";
 import { CleanupRunner, CleanupTarget } from "../services/CleanupRunner";
 import { FollowStore } from "../services/FollowStore";
+import { checkUnfollowRate, DAY_MS } from "../services/unfollowRateGate";
 import {
   scoreAccount,
   fromFollowingsRecord,
@@ -14,6 +15,11 @@ import {
 
 const TARGETS_PATH = path.join(process.cwd(), "output", "cleanup-targets.json");
 const LOG_PATH = path.join(process.cwd(), "output", "auto-follow-log.jsonl");
+
+/** Format a timestamp for human-readable output in Korea time. */
+function kst(date: Date): string {
+  return date.toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }) + " KST";
+}
 
 function appendLog(record: unknown): void {
   try {
@@ -102,6 +108,22 @@ async function run(): Promise<void> {
 
   const store = new FollowStore(config.statePath);
   store.load();
+
+  // Rate ceiling, before any work: no target file parsing, no browser, no
+  // login. Dry runs are exempt so they stay freely repeatable.
+  if (!config.dryRun) {
+    const now = new Date();
+    const gate = checkUnfollowRate({
+      history: store.unfollowsSince(new Date(now.getTime() - DAY_MS)),
+      perDay: config.unfollowPerDay,
+      now,
+    });
+    if (!gate.allowed) {
+      console.log(gate.reason);
+      console.log(`Next run allowed at ${kst(gate.nextAllowedAt)}.`);
+      return;
+    }
+  }
 
   // Anything already cleaned in an earlier cycle is skipped, so --run is safe
   // to re-invoke across days.

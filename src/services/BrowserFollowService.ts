@@ -12,6 +12,43 @@ export interface BrowserFollowConfig {
   headless?: boolean;
 }
 
+/**
+ * Decide whether an unfollow attempt may be reported as "unfollowed" after the
+ * confirm-dialog step.
+ *
+ * `sawDialog` true means the confirm button was found and clicked, so the
+ * unfollow was submitted; a missing flip after that is just X being slow, and
+ * reporting success is right — the caller blocklists the handle and we never
+ * touch it again.
+ *
+ * `sawDialog` false with no flip either means nothing happened: most likely the
+ * confirmationSheetConfirm test id drifted. Returning "unfollowed" there would
+ * blocklist an account we are still following, and because the blocklist is
+ * permanent and filters the cleanup target list, that account could never be
+ * cleaned again — one selector change would burn the whole target list. So we
+ * throw: the caller records a failure, leaves the handle un-blocklisted, and a
+ * later cycle retries it. Retrying is safe precisely because unfollow()
+ * re-navigates and returns "not-following" when the profile already shows
+ * "Follow @user" — it never blind-clicks.
+ */
+export function assertUnfollowLanded(
+  username: string,
+  sawDialog: boolean,
+  flipped: boolean
+): void {
+  if (flipped) return;
+  if (!sawDialog) {
+    throw new Error(
+      `unfollow for @${username} was not confirmed: no confirmation dialog ` +
+        `(confirmationSheetConfirm) appeared and the button never flipped back to ` +
+        `"Follow @${username}" — treating as NOT unfollowed`
+    );
+  }
+  console.warn(
+    `Clicked Unfollow for @${username} but confirmation was slow — assuming unfollowed`
+  );
+}
+
 export class BrowserFollowService implements IFollower {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -223,11 +260,7 @@ export class BrowserFollowService implements IFollower {
         .waitFor({ state: "visible", timeout: 10000 })
         .then(() => true)
         .catch(() => false);
-      if (!flipped) {
-        console.warn(
-          `Clicked Unfollow for @${username} but confirmation was slow — assuming unfollowed`
-        );
-      }
+      assertUnfollowLanded(username, sawDialog, flipped);
       return "unfollowed";
     } finally {
       await page.close();

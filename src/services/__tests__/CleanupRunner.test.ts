@@ -119,3 +119,102 @@ test("an empty target list is a no-op, not an error", async () => {
   assert.equal(sum.attempted, 0);
   assert.equal(sum.remaining, 0);
 });
+
+/** Counts save() calls while still writing the real file. */
+class SpyStore extends FollowStore {
+  saves = 0;
+  override save(): void {
+    this.saves++;
+    super.save();
+  }
+}
+
+function spyStore(): SpyStore {
+  const s = new SpyStore(tmpFile());
+  s.load();
+  return s;
+}
+
+test("saves after every unfollow, not once at the end of the cycle", async () => {
+  const s = spyStore();
+  await new CleanupRunner(new FakeFollower(), s, {
+    targets: targets("a", "b", "c"),
+    maxPerRun: 3,
+    dryRun: false,
+    delayMs: noDelay,
+  }).runCycle();
+
+  assert.equal(s.saves, 3, "one durable write per irreversible unfollow");
+});
+
+test("each unfollow is on disk before the next one starts", async () => {
+  const file = tmpFile();
+  const s = new FollowStore(file);
+  s.load();
+
+  // Read the state file at the top of every unfollow: an interrupt at this point
+  // must already find the previous unfollows recorded.
+  const seen: string[][] = [];
+  const follower: IFollower = {
+    async follow(): Promise<FollowResult> {
+      throw new Error("follow must not be called during cleanup");
+    },
+    async unfollow(): Promise<UnfollowResult> {
+      const raw = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : '{"unfollowed":[]}';
+      seen.push((JSON.parse(raw) as { unfollowed?: string[] }).unfollowed ?? []);
+      return "unfollowed";
+    },
+  };
+
+  await new CleanupRunner(follower, s, {
+    targets: targets("a", "b", "c"),
+    maxPerRun: 3,
+    dryRun: false,
+    delayMs: noDelay,
+  }).runCycle();
+
+  assert.deepEqual(seen, [[], ["a"], ["a", "b"]]);
+  const final = JSON.parse(fs.readFileSync(file, "utf8")) as { unfollowed?: string[] };
+  assert.deepEqual(final.unfollowed, ["a", "b", "c"]);
+});
+
+test("a failed unfollow is neither recorded nor counted against the rate ceiling", async () => {
+  const s = spyStore();
+  await new CleanupRunner(new FakeFollower({ a: "throw" }), s, {
+    targets: targets("a", "b"),
+    maxPerRun: 2,
+    dryRun: false,
+    delayMs: noDelay,
+  }).runCycle();
+
+  assert.equal(s.saves, 1);
+  assert.equal(s.unfollowsSince(new Date(0)).length, 1);
+});
+
+test("each unfollow records a timestamp for the rate ceiling", async () => {
+  const s = store();
+  const before = Date.now();
+  await new CleanupRunner(new FakeFollower({ b: "not-following" }), s, {
+    targets: targets("a", "b"),
+    maxPerRun: 2,
+    dryRun: false,
+    delayMs: noDelay,
+  }).runCycle();
+
+  const stamps = s.unfollowsSince(new Date(before - 1000));
+  // "not-following" counts too: it still consumed an unfollow interaction with X.
+  assert.equal(stamps.length, 2);
+});
+
+test("dry-run neither saves nor records timestamps", async () => {
+  const s = spyStore();
+  await new CleanupRunner(new FakeFollower(), s, {
+    targets: targets("a", "b"),
+    maxPerRun: 2,
+    dryRun: true,
+    delayMs: noDelay,
+  }).runCycle();
+
+  assert.equal(s.saves, 0);
+  assert.equal(s.unfollowsSince(new Date(0)).length, 0);
+});

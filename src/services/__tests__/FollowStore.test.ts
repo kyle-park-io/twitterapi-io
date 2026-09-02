@@ -14,6 +14,13 @@ test("missing file loads as empty state", () => {
   store.load();
   assert.equal(store.has("alice"), false);
   assert.equal(store.getLastRun(), null);
+  assert.equal(store.getLastSuccessAt(), null);
+  assert.equal(store.getConsecutiveZeroCycles(), 0);
+  assert.equal(store.getLastActualFollowingCount(), null);
+  assert.equal(store.getCapStallCycles(), 0);
+  assert.equal(store.getCapDetectedAt(), null);
+  assert.equal(store.getCapActualCount(), null);
+  assert.equal(store.unfollowedCount(), 0);
 });
 
 test("add + has is case-insensitive", () => {
@@ -39,16 +46,23 @@ test("save then load round-trips followed set and lastRun", () => {
   assert.deepEqual(b.getLastRun(), when);
 });
 
-test("malformed file loads as empty state without throwing", () => {
+// This test used to assert the opposite — that a malformed file loads as empty
+// state without throwing. That encoded the bug: an unreadable state file is
+// indistinguishable from a first run, and the very next save() writes that empty
+// state over thousands of real follow records and the permanent unfollow
+// blocklist. Only a *missing* file may reset.
+test("an existing but unparseable file throws rather than resetting to empty", () => {
   const file = tmpFile();
   fs.writeFileSync(file, "{ not valid json", "utf8");
   const store = new FollowStore(file);
-  store.load();
-  assert.equal(store.has("anyone"), false);
-  assert.equal(store.getLastRun(), null);
-  // The catch path must also reset the health fields, not leave stale values.
-  assert.equal(store.getLastSuccessAt(), null);
-  assert.equal(store.getConsecutiveZeroCycles(), 0);
+  assert.throws(() => store.load(), /could not be parsed as state/);
+});
+
+test("a file holding valid JSON that is not a state object throws", () => {
+  const file = tmpFile();
+  fs.writeFileSync(file, "[1, 2, 3]", "utf8");
+  const store = new FollowStore(file);
+  assert.throws(() => store.load(), /could not be parsed as state/);
 });
 
 test("save creates parent directories", () => {
@@ -294,17 +308,6 @@ test("clearing cap fields with null round-trips", () => {
   assert.equal(reloaded.getCapActualCount(), null);
 });
 
-test("malformed file resets cap fields", () => {
-  const file = tmpFile();
-  fs.writeFileSync(file, "{ not valid json", "utf8");
-  const store = new FollowStore(file);
-  store.load();
-  assert.equal(store.getLastActualFollowingCount(), null);
-  assert.equal(store.getCapStallCycles(), 0);
-  assert.equal(store.getCapDetectedAt(), null);
-  assert.equal(store.getCapActualCount(), null);
-});
-
 test("remove takes a user out of the followed-set case-insensitively", () => {
   const store = new FollowStore(tmpFile());
   store.load();
@@ -364,4 +367,197 @@ test("removing from the followed set does not clear the unfollowed record", () =
   assert.equal(store.wasUnfollowed("spammer"), true);
   store.enqueue("spammer");
   assert.equal(store.queueSize(), 0);
+});
+
+test("markUnfollowed evicts the handle from the pending queue", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("spammer", { keyword: "AI" });
+  store.enqueue("keeper");
+  store.markUnfollowed("SPAMMER"); // case-insensitive
+  assert.equal(store.isQueued("spammer"), false);
+  assert.equal(store.queueSize(), 1);
+  assert.deepEqual(store.peek(5), [{ userName: "keeper" }]);
+});
+
+test("load drops unfollowed handles from a persisted queue", () => {
+  const file = tmpFile();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      followed: [],
+      // Written by an older process that queued the handle before it was cleaned.
+      queue: ["Spammer", { userName: "keeper" }],
+      lastRun: null,
+      unfollowed: ["spammer"],
+    })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.queueSize(), 1);
+  assert.equal(store.isQueued("spammer"), false);
+  assert.equal(store.wasUnfollowed("spammer"), true);
+  assert.deepEqual(store.peek(5), [{ userName: "keeper" }]);
+});
+
+test("save unions the on-disk unfollowed set instead of overwriting it", () => {
+  const file = tmpFile();
+  // Two processes that each loaded the same state and unfollowed someone else.
+  const a = new FollowStore(file);
+  a.load();
+  const b = new FollowStore(file);
+  b.load();
+
+  a.markUnfollowed("first");
+  a.save();
+  b.markUnfollowed("second"); // b's snapshot predates a's write
+  b.save();
+
+  const c = new FollowStore(file);
+  c.load();
+  assert.equal(c.wasUnfollowed("first"), true, "b.save() must not erase a's blocklist entry");
+  assert.equal(c.wasUnfollowed("second"), true);
+  assert.equal(c.unfollowedCount(), 2);
+});
+
+test("save also unions the on-disk unfollow history", () => {
+  const file = tmpFile();
+  const a = new FollowStore(file);
+  a.load();
+  const b = new FollowStore(file);
+  b.load();
+
+  a.recordUnfollow(new Date(Date.now() - 60_000));
+  a.save();
+  b.recordUnfollow(new Date(Date.now() - 30_000));
+  b.save();
+
+  const c = new FollowStore(file);
+  c.load();
+  assert.equal(c.unfollowsSince(new Date(Date.now() - 3_600_000)).length, 2);
+});
+
+test("save unions across processes even when the queue diverged", () => {
+  const file = tmpFile();
+  const service = new FollowStore(file);
+  service.load();
+  service.enqueue("spammer");
+  service.save();
+
+  const cleanup = new FollowStore(file);
+  cleanup.load();
+  cleanup.markUnfollowed("spammer");
+  cleanup.save();
+
+  // The follow service still holds "spammer" queued from before the cleanup.
+  service.save();
+  const after = new FollowStore(file);
+  after.load();
+  assert.equal(after.wasUnfollowed("spammer"), true);
+  assert.equal(after.isQueued("spammer"), false, "the persisted queue must not resurrect it");
+});
+
+test("refreshUnfollowed picks up another process's blocklist and purges the queue", () => {
+  const file = tmpFile();
+  const service = new FollowStore(file);
+  service.load();
+  service.enqueue("spammer");
+  service.save();
+
+  const cleanup = new FollowStore(file);
+  cleanup.load();
+  cleanup.markUnfollowed("spammer");
+  cleanup.save();
+
+  assert.equal(service.wasUnfollowed("spammer"), false); // stale snapshot
+  service.refreshUnfollowed();
+  assert.equal(service.wasUnfollowed("spammer"), true);
+  assert.equal(service.isQueued("spammer"), false);
+  assert.equal(service.queueSize(), 0);
+});
+
+test("refreshUnfollowed tolerates a missing state file", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  store.enqueue("alice");
+  store.refreshUnfollowed();
+  assert.equal(store.queueSize(), 1);
+});
+
+test("recordUnfollow timestamps count toward the trailing 24h window", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  const now = Date.now();
+  store.recordUnfollow(new Date(now - 2 * 60 * 60 * 1000));
+  store.recordUnfollow(new Date(now - 60 * 60 * 1000));
+  store.recordUnfollow(new Date(now - 30 * 60 * 60 * 1000)); // 30h ago: inside retention, outside 24h
+
+  assert.equal(store.unfollowsSince(new Date(now - 24 * 60 * 60 * 1000)).length, 2);
+  assert.equal(store.unfollowsSince(new Date(now - 48 * 60 * 60 * 1000)).length, 3);
+});
+
+test("unfollow history is pruned beyond 48h so it cannot grow unbounded", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  const now = Date.now();
+  store.recordUnfollow(new Date(now - 49 * 60 * 60 * 1000));
+  store.recordUnfollow(new Date(now - 1000));
+  const kept = store.unfollowsSince(new Date(0));
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].getTime() > now - 60_000, true);
+});
+
+test("load prunes unfollow history older than 48h", () => {
+  const file = tmpFile();
+  const now = Date.now();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      followed: [],
+      queue: [],
+      lastRun: null,
+      unfollowRunAt: [
+        new Date(now - 72 * 60 * 60 * 1000).toISOString(),
+        new Date(now - 60_000).toISOString(),
+      ],
+    })
+  );
+  const store = new FollowStore(file);
+  store.load();
+  assert.equal(store.unfollowsSince(new Date(0)).length, 1);
+});
+
+test("lastUnfollowAt returns the most recent timestamp", () => {
+  const store = new FollowStore(tmpFile());
+  store.load();
+  assert.equal(store.lastUnfollowAt(), null);
+  const now = Date.now();
+  store.recordUnfollow(new Date(now - 5 * 60 * 1000));
+  store.recordUnfollow(new Date(now - 90 * 60 * 1000)); // out of order
+  assert.equal(store.lastUnfollowAt()?.getTime(), now - 5 * 60 * 1000);
+});
+
+test("unfollow history round-trips through save/load", () => {
+  const file = tmpFile();
+  const when = new Date(Date.now() - 10 * 60 * 1000);
+  const store = new FollowStore(file);
+  store.load();
+  store.recordUnfollow(when);
+  store.save();
+
+  const reloaded = new FollowStore(file);
+  reloaded.load();
+  assert.equal(reloaded.lastUnfollowAt()?.toISOString(), when.toISOString());
+});
+
+test("save leaves no temp file behind and writes parseable state", () => {
+  const file = tmpFile();
+  const store = new FollowStore(file);
+  store.load();
+  store.add("alice");
+  store.save();
+  store.save();
+  const siblings = fs.readdirSync(path.dirname(file));
+  assert.deepEqual(siblings, [path.basename(file)]);
+  assert.equal(typeof JSON.parse(fs.readFileSync(file, "utf8")), "object");
 });

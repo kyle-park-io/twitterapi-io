@@ -125,7 +125,14 @@ async function runCapProbe(
   store: FollowStore,
   xUser: string
 ): Promise<void> {
-  const targets = store.dequeue(CAP_PROBE_COUNT);
+  // Same guard as the normal drain path: a cleanup run may have unfollowed
+  // accounts that were queued before it ran, and the probe follows for real.
+  store.refreshUnfollowed();
+  const targets = store.dequeue(CAP_PROBE_COUNT).filter((c) => {
+    if (!store.wasUnfollowed(c.userName)) return true;
+    console.warn(`[cap-probe] skipping @${c.userName} — previously unfollowed, never re-follow`);
+    return false;
+  });
   const alreadyFollowing = new Set<string>();
   for (const c of targets) {
     try {

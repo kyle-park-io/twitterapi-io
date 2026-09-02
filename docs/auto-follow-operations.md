@@ -104,12 +104,26 @@ following list that's 388 unfollow targets / 405 review / 6,675 clean.
 
 ### Rate ceiling
 
-The designed ceiling: 9 unfollows per `--run` invocation (`unfollowPerRun`),
-one invocation per hour, 50/day for the first two days then up to 100/day
-(`unfollowPerDay`). Nothing schedules `--run` automatically yet — no systemd
-timer exists for it the way `follow-audit.timer` exists for audits — so
-hitting this cadence means invoking it yourself (cron, a timer you add, or by
-hand) roughly hourly and stopping once you hit the daily figure.
+The ceiling: 9 unfollows per `--run` invocation (`unfollowPerRun`), one
+invocation per hour, and `unfollowPerDay` (50) unfollows per trailing 24 hours.
+
+All three are enforced in code, not left to the operator. Every unfollow
+appends a timestamp to `unfollowRunAt` in `.auth/auto-follow-state.json`
+(pruned to the trailing 48 h), and a real `--run` refuses to start when either
+
+- the trailing 24 h already holds `unfollowPerDay` unfollows, or
+- the most recent unfollow was less than 55 minutes ago.
+
+A refusal prints the reason and the time the next run is allowed, then exits
+cleanly — it is not an error, so a cron entry that fires too often is harmless.
+Dry runs skip both checks and stay freely repeatable. Raising the daily figure
+(the design allows up to 100/day after the first two days) is a matter of
+editing `unfollowPerDay` in `config/auto-follow.json`.
+
+Nothing schedules `--run` automatically yet — no systemd timer exists for it
+the way `follow-audit.timer` exists for audits — so the cadence still means
+invoking it yourself (cron, a timer you add, or by hand) roughly hourly. The
+gate is the floor, not the scheduler.
 
 This ceiling is set *below* the account's own measured-safe follow rate —
 7,618 follows over 555.6 hours (13.7/hour, 329/day, sustained 23 days with no
@@ -125,14 +139,46 @@ is recorded in a permanent blocklist in `.auth/auto-follow-state.json`
 re-queued by either the follow loop or the cleanup runner. There is no undo —
 treat every `--run` invocation as irreversible.
 
+The blocklist is applied at four points, because a handle can already be in the
+queue when it gets unfollowed:
+
+1. `enqueue()` refuses a blocklisted handle.
+2. `markUnfollowed()` evicts the handle from the pending queue.
+3. `load()` filters blocklisted handles out of the restored queue, so a state
+   file written by an older process cannot reintroduce them.
+4. The follow loop re-reads the blocklist and re-checks every dequeued
+   candidate immediately before following it (`AutoFollowRunner.drainQueue`
+   and the cap probe in `auto-follow.ts`).
+
+### A corrupt state file stops the loop
+
+`FollowStore.load()` distinguishes *missing* from *corrupt*. A missing file is
+a first run and loads as empty state; a file that exists but does not parse
+throws, and the process exits. That is deliberate: the old behaviour reset to
+empty and the next `save()` wrote `{}` over 7,748 follow records and the
+blocklist. If you see `exists but could not be parsed as state`, inspect
+`.auth/auto-follow-state.json` by hand — do not delete it. Writes are
+temp-file-plus-rename, so a crash mid-save leaves the previous file intact.
+
 ### Before running cleanup
 
 Stop the auto-follow service first (`systemctl --user stop auto-follow`).
+
 Both the follow loop and the cleanup runner write
-`.auth/auto-follow-state.json`, so running them at the same time risks a lost
-update. `dryRun` stays `true` in the committed config — flip it to `false`
-only in a working-tree copy for the actual cleanup pass, then restore `true`
-and restart the service once the pass is done.
+`.auth/auto-follow-state.json`, and each `save()` rewrites the whole file from
+its own in-memory snapshot. The append-only fields survive that: `save()`
+re-reads the file and unions the on-disk `unfollowed` blocklist and
+`unfollowRunAt` history back in before writing, so a concurrent write can no
+longer erase an unfollow record or let the daily counter be reset. Everything
+else in the file is still last-writer-wins — the followed-set, the queue and
+the cap-detection fields would be rolled back to the other process's snapshot —
+and the follow loop would keep following from a queue it built before the
+cleanup pass started. So stop the service anyway; the union makes a mistake
+survivable, not correct.
+
+`dryRun` stays `true` in the committed config — flip it to `false` only in a
+working-tree copy for the actual cleanup pass, then restore `true` and restart
+the service once the pass is done.
 
 ### The `type:"cleanup"` log record
 
