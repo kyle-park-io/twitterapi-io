@@ -36,6 +36,9 @@ function recordingFollower(): { followed: string[] } & IFollower {
       followed.push(username);
       return "followed" as const;
     },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
+    },
   };
 }
 
@@ -329,6 +332,9 @@ function failingFollower(): IFollower {
     async follow(_username: string): Promise<never> {
       throw new Error("blocked");
     },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
+    },
   };
 }
 
@@ -336,6 +342,9 @@ function alreadyFollowingFollower(): IFollower {
   return {
     async follow(_username: string) {
       return "already-following" as const;
+    },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
     },
   };
 }
@@ -606,6 +615,9 @@ test("followFailures counts only genuine throws, not already-following", async (
       if (username === "existing") return "already-following" as const;
       if (username === "broken") throw new Error("blocked");
       return "followed" as const;
+    },
+    async unfollow(_username: string): Promise<never> {
+      throw new Error("unfollow must not be called");
     },
   };
   const runner = new AutoFollowRunner(search, store, mixedFollower, {

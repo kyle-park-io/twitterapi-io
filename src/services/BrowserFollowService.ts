@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { chromium, Browser, BrowserContext, Page } from "playwright";
-import { IFollower, FollowResult } from "../follow/IFollower";
+import { IFollower, FollowResult, UnfollowResult } from "../follow/IFollower";
 
 export interface BrowserFollowConfig {
   xUser: string;
@@ -171,6 +171,64 @@ export class BrowserFollowService implements IFollower {
       }
       // The followed-state button is already showing — we already follow them.
       return "already-following";
+    } finally {
+      await page.close();
+    }
+  }
+
+  async unfollow(username: string): Promise<UnfollowResult> {
+    if (!this.context) throw new Error("Not logged in — call login() first");
+    const page = await this.context.newPage();
+    try {
+      await page.goto(`https://x.com/${username}`, { waitUntil: "domcontentloaded" });
+
+      // The followed-state button renders as "Following @user" or "Unfollow @user"
+      // depending on the UI variant and hover state — accept either, exactly as
+      // the follow path does.
+      const followedState = page.getByRole("button", {
+        name: new RegExp(`^(Following|Unfollow) @${username}$`, "i"),
+      });
+      const followButton = page.getByRole("button", {
+        name: new RegExp(`^Follow @${username}$`, "i"),
+      });
+
+      const isFollowed = await followedState
+        .waitFor({ state: "visible", timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!isFollowed) {
+        // Already not following is a valid outcome; nothing rendering at all is not.
+        const canFollow = await followButton.isVisible({ timeout: 3000 }).catch(() => false);
+        if (canFollow) return "not-following";
+        throw new Error(
+          `neither Follow nor Following/Unfollow button rendered for @${username} within 15s`
+        );
+      }
+
+      await followedState.click();
+
+      // Confirmation dialog — its confirm button carries a stable test id.
+      const confirm = page.getByTestId("confirmationSheetConfirm");
+      const sawDialog = await confirm
+        .waitFor({ state: "visible", timeout: 5000 })
+        .then(() => true)
+        .catch(() => false);
+      if (sawDialog) await confirm.click();
+
+      // Confirm the flip back to Follow. As with the follow path, a slow
+      // confirmation is treated as success rather than retried — clicking again
+      // would re-follow, which is the one thing we must never do.
+      const flipped = await followButton
+        .waitFor({ state: "visible", timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!flipped) {
+        console.warn(
+          `Clicked Unfollow for @${username} but confirmation was slow — assuming unfollowed`
+        );
+      }
+      return "unfollowed";
     } finally {
       await page.close();
     }
