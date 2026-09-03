@@ -10,7 +10,7 @@ import { UserService } from "../services/UserService";
 // KR output can be read against what global shipped on the same days.
 // Weekly windows keep each advanced_search query under the pagination cutoff.
 const PERIOD_START = "2026-04-07";
-const PERIOD_END = "2026-07-24"; // exclusive: covers through 2026-07-23
+const PERIOD_END = process.env.PERIOD_END ?? "2026-09-04"; // exclusive: covers through the previous day
 
 const ACCOUNTS = [
   { userName: "0xMantleKR", scope: "kr", label: "Mantle Korea (official KR account)" },
