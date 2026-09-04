@@ -32,6 +32,31 @@ pnpm example:search -- "<query>" --max 100               # fetch up to 100 tweet
 pnpm example:search -- "<query>" --max 100 --sort-by views --output output/tweets.json
 ```
 
+### X Article → blog post
+
+Turns one of my X long-form articles into a post for the blog at jungho.dev,
+ready to commit to the content repo.
+
+```bash
+pnpm example:x-article -- <tweet-id-or-url> --list          # preview: title, summary, first 40 lines
+pnpm example:x-article -- <tweet-id-or-url> --slug rfq-deep-dive
+pnpm example:x-article -- <tweet-id-or-url> --slug rfq-deep-dive --out ~/code/blog/content/posts
+```
+
+The id is the **tweet carrying the article**, not the article id — that is what
+`/twitter/article` takes. Output is `<out>/<slug>/index.md` plus the article's
+images downloaded alongside it, because the blog colocates a post's images with
+the post. `tags:` is left empty on purpose: fill it in before committing.
+
+Two things the conversion handles that a naive one does not:
+
+- Emphasis next to Korean text. CommonMark will not close `**` against a letter
+  on both sides, and Korean runs a word straight into its particle, so
+  `**14.5%**입니다` renders the asterisks literally. Those ranges become
+  `<strong>` instead.
+- Markdown syntax inside prose. An article wrote a range as `40~65%`, which GFM
+  read as strikethrough. Block text is escaped before styling.
+
 ### Trends
 
 ```bash
