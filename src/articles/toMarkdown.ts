@@ -52,7 +52,43 @@ const HTML_TAG: Record<string, string> = {
  * and GFM read `~...~` as strikethrough and rendered "40<del>65%</del>".
  */
 export function escapeInline(text: string): string {
-  return text.replace(/([\\`*_~[\]<>])/g, "\\$1");
+  // Anything the author wrote as real Markdown, or as a bare URL, is left
+  // exactly as it is. They do write links by hand - one article's "Learn
+  // More" section is a list of them - and escaping the brackets turned each
+  // into literal text followed by a naked URL in parentheses. A URL is
+  // spared too: escaping an underscore inside one breaks the link.
+  const KEEP =
+    /(\[[^\]\n]*\]\([^)\s]+(?:\s+"[^"]*")?\)|<?https?:\/\/[^\s<>)\]]+>?)/g;
+
+  return text
+    .split(KEEP)
+    .map((piece, index) =>
+      // split() with one capture group alternates: gap, match, gap, match...
+      index % 2 === 1 ? piece : piece.replace(/([\\`*_~[\]<>])/g, "\\$1"),
+    )
+    .join("");
+}
+
+/**
+ * Drops emphasis markers the author typed inside a range they also styled.
+ *
+ * One article has `**fully on-chain orderbook**` as the text of a bold range:
+ * a Markdown habit carried into a WYSIWYG editor. Escaped faithfully, it
+ * renders as bold text with literal asterisks around it, which reads as a
+ * mistake rather than as emphasis.
+ */
+export function stripRedundantMarkers(text: string): string {
+  let out = text;
+  for (const marker of ["**", "__", "*", "_"]) {
+    while (
+      out.length > marker.length * 2 &&
+      out.startsWith(marker) &&
+      out.endsWith(marker)
+    ) {
+      out = out.slice(marker.length, -marker.length).trim();
+    }
+  }
+  return out;
 }
 
 /** True where a `**` next to this character would still parse as emphasis. */
@@ -103,8 +139,12 @@ export function applyInlineStyles(
     const styled = text.slice(range.offset, end);
     // A range that includes its own trailing space would put the closing
     // marker after it, and "** " closes nothing.
-    const trimmed = styled.trimEnd();
-    const spill = styled.slice(trimmed.length);
+    // The spill is measured against the untouched slice: stripping the
+    // author's own markers shortens the text, and slicing by the
+    // shortened length left the markers behind as trailing prose.
+    const withoutTrailingSpace = styled.trimEnd();
+    const spill = styled.slice(withoutTrailingSpace.length);
+    const trimmed = stripRedundantMarkers(withoutTrailingSpace);
 
     if (trimmed === "") {
       pieces.unshift(escapeInline(styled));
@@ -153,7 +193,27 @@ export function articleToMarkdown(blocks: ArticleBlock[]): MarkdownArticle {
 
   const HEADINGS = new Set(["header-one", "header-two", "header-three"]);
 
+  // Some articles write their headings by hand, as a bold paragraph whose
+  // text begins with `#` - X's editor has no heading button in every
+  // surface. Left as paragraphs they render as literal hashes and the post
+  // gets no structure at all: no headings, and so no table of contents. One
+  // article's twelve sections all arrived this way.
+  const HAND_WRITTEN_HEADING = /^(#{1,6})\s+(.+?)\s*$/;
+
   for (const block of blocks) {
+    const handWritten =
+      block.type === "unstyled"
+        ? HAND_WRITTEN_HEADING.exec(block.text ?? "")
+        : null;
+    if (handWritten) {
+      // Shifted down one level, for the same reason header-one is: the
+      // post's title is the page's only h1.
+      const depth = Math.min(handWritten[1].length + 1, 6);
+      lines.push(`${"#".repeat(depth)} ${handWritten[2]}`, "");
+      inList = false;
+      continue;
+    }
+
     // Inline styles are dropped inside a heading: a heading is already
     // emphatic, and the article's own `**Abstract**` came through as a
     // heading containing literal asterisks.

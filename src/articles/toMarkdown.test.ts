@@ -223,3 +223,80 @@ test("a code block is never escaped", () => {
   const { markdown } = articleToMarkdown([{ type: "markdown", text: code }]);
   assert.equal(markdown, code + "\n");
 });
+
+test("a heading written by hand as a bold paragraph becomes a real heading", () => {
+  // X's editor does not offer headings everywhere, so an article wrote all
+  // twelve of its sections as `**# Introduction**`. Left as paragraphs they
+  // render as literal hashes, and the post gets no table of contents.
+  const { markdown } = articleToMarkdown([
+    {
+      type: "unstyled",
+      text: "# Introduction",
+      inlineStyleRanges: [{ offset: 0, length: 14, style: "Bold" }],
+    },
+    { type: "unstyled", text: "## Why it is hard" },
+    { type: "unstyled", text: "Body text." },
+  ]);
+  assert.equal(
+    markdown,
+    "## Introduction\n\n### Why it is hard\n\nBody text.\n",
+  );
+});
+
+test("a hash with no space after it stays prose", () => {
+  // CommonMark needs a space after the hashes for an ATX heading, so `#1`
+  // is not one and needs no escaping either.
+  const { markdown } = articleToMarkdown([
+    { type: "unstyled", text: "#1 우선순위는 성능입니다" },
+  ]);
+  assert.equal(markdown, "#1 우선순위는 성능입니다\n");
+  assert.ok(!markdown.startsWith("## "));
+});
+
+test("markers the author typed inside a styled range are dropped", () => {
+  // One article has `**fully on-chain orderbook**` as the text of a bold
+  // range: a Markdown habit carried into a WYSIWYG editor. Kept, it renders
+  // as bold text with literal asterisks around it.
+  const got = applyInlineStyles("it is a **fully on-chain orderbook** here", [
+    { offset: 8, length: 28, style: "Bold" },
+  ]);
+  assert.equal(got, "it is a **fully on-chain orderbook** here");
+  assert.ok(!got.includes("****"));
+});
+
+test("asterisks that are not wrapping the whole range are kept and escaped", () => {
+  // A lone asterisk in prose is a character, not a marker.
+  const got = applyInlineStyles("rate * factor", undefined);
+  assert.equal(got, "rate \\* factor");
+});
+
+test("a Markdown link the author wrote survives escaping", () => {
+  // One article's "Learn More" section is a list of hand-written links.
+  // Escaping their brackets turned each into literal text followed by a
+  // naked URL in parentheses.
+  const got = applyInlineStyles(
+    "GitHub Repository: [injective-core](https://github.com/InjectiveFoundation/injective-core)",
+    undefined,
+  );
+  assert.equal(
+    got,
+    "GitHub Repository: [injective-core](https://github.com/InjectiveFoundation/injective-core)",
+  );
+});
+
+test("a bare URL keeps its underscores", () => {
+  // `_` inside a URL would be escaped to `\_` and break the link.
+  const got = applyInlineStyles(
+    "see https://example.com/a_b_c for more",
+    undefined,
+  );
+  assert.equal(got, "see https://example.com/a_b_c for more");
+});
+
+test("syntax outside a link is still escaped", () => {
+  const got = applyInlineStyles(
+    "40~65% at [docs](https://x.dev/a_b) and * more",
+    undefined,
+  );
+  assert.equal(got, "40\\~65% at [docs](https://x.dev/a_b) and \\* more");
+});
